@@ -1,0 +1,11 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+.pytest_cache/
+
+# Local database can contain user accounts and password hashes.
+db.sqlite3
