@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect ,get_object_or_404
 from .models import Movie,Theater,Seat,Booking
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError
+from .validators import extract_youtube_video_id
 
 def movie_list(request):
     search_query=request.GET.get('search')
@@ -10,6 +11,18 @@ def movie_list(request):
     else:
         movies=Movie.objects.all()
     return render(request,'movies/movie_list.html',{'movies':movies})
+
+def movie_detail(request,movie_id):
+    movie = get_object_or_404(Movie,id=movie_id)
+    video_id = extract_youtube_video_id(movie.trailer_url)
+    trailer_embed_url = None
+    if video_id:
+        trailer_embed_url = f'https://www.youtube.com/embed/{video_id}'
+    return render(
+        request,
+        'movies/movie_detail.html',
+        {'movie':movie,'trailer_embed_url':trailer_embed_url},
+    )
 
 def theater_list(request,movie_id):
     movie = get_object_or_404(Movie,id=movie_id)
@@ -51,6 +64,5 @@ def book_seats(request,theater_id):
             return render(request,'movies/seat_selection.html',context)
         return redirect('profile')
     return render(request,'movies/seat_selection.html',context)
-
 
 

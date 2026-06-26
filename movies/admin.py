@@ -3,7 +3,7 @@ from .models import Movie, Theater, Seat,Booking
 
 @admin.register(Movie)
 class MovieAdmin(admin.ModelAdmin):
-    list_display = ['name', 'rating', 'cast','description']
+    list_display = ['name', 'rating', 'cast','description','trailer_url']
 
 @admin.register(Theater)
 class TheaterAdmin(admin.ModelAdmin):
