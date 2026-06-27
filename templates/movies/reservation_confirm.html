@@ -1,0 +1,54 @@
+{% extends "users/basic.html" %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card shadow">
+        <div class="card-header bg-dark text-white">
+          <h3 class="mb-0">Confirm Booking</h3>
+        </div>
+        <div class="card-body">
+          <h4>{{ movie.name }}</h4>
+          <p class="text-muted mb-2">{{ theater.name }} | {{ theater.time }}</p>
+
+          <p>
+            <strong>Selected seats:</strong>
+            {% for reservation in reservations %}
+              {{ reservation.seat.seat_number }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+          </p>
+
+          <p>
+            <strong>Reserved until:</strong>
+            {{ expires_at|date:"F d, Y H:i:s" }}
+          </p>
+
+          {% if error %}
+          <div class="alert alert-danger" role="alert">{{ error }}</div>
+          {% endif %}
+
+          {% if not expired %}
+          <div class="alert alert-info" role="alert">
+            Your seats are reserved for 2 minutes. Confirm booking before the timer expires.
+          </div>
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success">
+              Confirm Booking
+            </button>
+            <a href="{% url 'book_seats' theater.id %}" class="btn btn-outline-secondary">
+              Back to Seats
+            </a>
+          </form>
+          {% else %}
+          <a href="{% url 'book_seats' theater.id %}" class="btn btn-primary">
+            Select Seats Again
+          </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
