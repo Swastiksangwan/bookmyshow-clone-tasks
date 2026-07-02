@@ -1,0 +1,56 @@
+{% extends "users/basic.html" %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card shadow">
+        <div class="card-header bg-dark text-white">
+          <h3 class="mb-0">Payment Status</h3>
+        </div>
+        <div class="card-body">
+          <h4>{{ movie.name }}</h4>
+          <p class="text-muted">{{ theater.name }} | {{ theater.time }}</p>
+
+          <p>
+            <strong>Selected seats:</strong>
+            {% for reservation in reservations %}
+              {{ reservation.seat.seat_number }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+          </p>
+
+          {% if payment_transaction %}
+          <p><strong>Status:</strong> {{ payment_transaction.status }}</p>
+          <p><strong>Order ID:</strong> {{ payment_transaction.razorpay_order_id }}</p>
+          {% if payment_transaction.razorpay_payment_id %}
+          <p><strong>Payment ID:</strong> {{ payment_transaction.razorpay_payment_id }}</p>
+          {% endif %}
+
+          {% if payment_transaction.status == "CAPTURED" %}
+          <div class="alert alert-success">Payment verified and booking confirmed.</div>
+          <a href="{% url 'profile' %}" class="btn btn-success">View Profile</a>
+          {% elif payment_transaction.status == "FAILED" %}
+          <div class="alert alert-danger">Payment verification failed. Please retry before the reservation expires.</div>
+          <a href="{% url 'reservation_confirm' payment_transaction.reservation_token %}" class="btn btn-primary">Retry Payment</a>
+          {% elif payment_transaction.status == "CANCELLED" %}
+          <div class="alert alert-warning">Payment was cancelled. You can retry before the reservation expires.</div>
+          <a href="{% url 'reservation_confirm' payment_transaction.reservation_token %}" class="btn btn-primary">Retry Payment</a>
+          {% elif payment_transaction.status == "REQUIRES_REVIEW" or payment_transaction.status == "BOOKING_PENDING" %}
+          <div class="alert alert-warning">Payment received but booking needs review. Please contact support.</div>
+          {% elif payment_transaction.status == "EXPIRED" %}
+          <div class="alert alert-danger">Reservation expired before booking could be confirmed.</div>
+          <a href="{% url 'book_seats' theater.id %}" class="btn btn-primary">Select Seats Again</a>
+          {% else %}
+          <div class="alert alert-info">Payment is not complete yet.</div>
+          <a href="{% url 'reservation_confirm' payment_transaction.reservation_token %}" class="btn btn-primary">Back to Payment</a>
+          {% endif %}
+          {% else %}
+          <div class="alert alert-warning">No payment transaction was found for this reservation.</div>
+          <a href="{% url 'book_seats' theater.id %}" class="btn btn-primary">Back to Seats</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

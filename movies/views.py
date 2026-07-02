@@ -1,13 +1,26 @@
+import hashlib
+import hmac
+import json
 import uuid
 from datetime import timedelta
 
-from django.http import Http404
+from django.conf import settings
+from django.http import Http404, HttpResponseBadRequest, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import render, redirect ,get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 
-from .models import Movie,Theater,Seat,Booking,SeatReservation
+from .models import (
+    Booking,
+    Movie,
+    PaymentTransaction,
+    PaymentWebhookEvent,
+    Seat,
+    SeatReservation,
+    Theater,
+)
 from .validators import extract_youtube_video_id
 
 
@@ -119,6 +132,230 @@ def _reservation_context(reservations, error=None, expired=False):
     return context
 
 
+def get_active_reservations_for_payment(reservation_token, user):
+    reservations = _get_user_reservations_or_404(reservation_token, user)
+    now = timezone.now()
+    if any(reservation.status == SeatReservation.STATUS_RESERVED and reservation.expires_at <= now for reservation in reservations):
+        _expire_reservations(now=now, reservation_token=reservation_token, user=user)
+        reservations = _get_user_reservations_or_404(reservation_token, user)
+        return None, 'This reservation has expired. Please select seats again.', True
+    if not all(reservation.status == SeatReservation.STATUS_RESERVED for reservation in reservations):
+        return None, 'This reservation is no longer active.', True
+    return reservations, None, False
+
+
+def calculate_reservation_amount(reservations):
+    amount = len(reservations) * settings.TICKET_PRICE_PAISE
+    return amount, settings.PAYMENT_CURRENCY
+
+
+def create_razorpay_order(amount, currency, receipt, notes=None):
+    import razorpay
+
+    client = razorpay.Client(
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    )
+    return client.order.create(
+        {
+            'amount': amount,
+            'currency': currency,
+            'receipt': receipt,
+            'payment_capture': 1,
+            'notes': notes or {},
+        }
+    )
+
+
+def get_or_create_payment_transaction(reservation_token, user):
+    reservations, error, expired = get_active_reservations_for_payment(reservation_token, user)
+    if error:
+        return None, reservations, error, expired
+    if not settings.RAZORPAY_KEY_ID or not settings.RAZORPAY_KEY_SECRET:
+        return (
+            None,
+            reservations,
+            'Payment gateway is not configured. Add Razorpay test keys to environment variables.',
+            False,
+        )
+
+    amount, currency = calculate_reservation_amount(reservations)
+    existing = (
+        PaymentTransaction.objects.filter(
+            reservation_token=reservation_token,
+            user=user,
+            status=PaymentTransaction.STATUS_CREATED,
+            amount=amount,
+            currency=currency,
+        )
+        .order_by('-created_at')
+        .first()
+    )
+    if existing:
+        return existing, reservations, None, False
+
+    try:
+        order = create_razorpay_order(
+            amount=amount,
+            currency=currency,
+            receipt=f'resv_{str(reservation_token)[:32]}',
+            notes={
+                'reservation_token': str(reservation_token),
+                'user_id': str(user.id),
+            },
+        )
+    except Exception:
+        return (
+            None,
+            reservations,
+            'Unable to create Razorpay order. Check test keys and try again.',
+            False,
+        )
+    razorpay_order_id = order['id']
+    transaction_obj = PaymentTransaction.objects.create(
+        user=user,
+        reservation_token=reservation_token,
+        razorpay_order_id=razorpay_order_id,
+        amount=amount,
+        currency=currency,
+        status=PaymentTransaction.STATUS_CREATED,
+        idempotency_key=f'reservation:{reservation_token}:razorpay_order:{razorpay_order_id}',
+        raw_provider_payload={'order': order},
+    )
+    return transaction_obj, reservations, None, False
+
+
+def verify_razorpay_checkout_signature(order_id, payment_id, signature):
+    if not settings.RAZORPAY_KEY_SECRET or not order_id or not payment_id or not signature:
+        return False
+    message = f'{order_id}|{payment_id}'.encode('utf-8')
+    expected_signature = hmac.new(
+        settings.RAZORPAY_KEY_SECRET.encode('utf-8'),
+        message,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected_signature, signature)
+
+
+def verify_razorpay_webhook_signature(raw_body, signature):
+    if not settings.RAZORPAY_WEBHOOK_SECRET or not signature:
+        return False
+    expected_signature = hmac.new(
+        settings.RAZORPAY_WEBHOOK_SECRET.encode('utf-8'),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected_signature, signature)
+
+
+def _bookings_exist_for_reservations(reservations):
+    seat_ids = [reservation.seat_id for reservation in reservations]
+    return Booking.objects.filter(seat_id__in=seat_ids).count() == len(seat_ids)
+
+
+def finalize_paid_reservation(payment_transaction, payment_payload=None):
+    payload = payment_payload or {}
+    try:
+        with transaction.atomic():
+            payment = PaymentTransaction.objects.select_for_update().get(
+                pk=payment_transaction.pk
+            )
+            reservations = list(
+                SeatReservation.objects.select_for_update()
+                .select_related('seat', 'theater', 'movie')
+                .filter(
+                    reservation_token=payment.reservation_token,
+                    user=payment.user,
+                )
+                .order_by('seat__seat_number')
+            )
+            if not reservations:
+                payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
+                payment.raw_provider_payload = payload
+                payment.save(update_fields=['status','raw_provider_payload','updated_at'])
+                return False, 'Payment received but booking needs review. Please contact support.'
+
+            if payment.status == PaymentTransaction.STATUS_CAPTURED and _bookings_exist_for_reservations(reservations):
+                return True, 'Booking already confirmed.'
+
+            now = timezone.now()
+            if any(reservation.expires_at <= now for reservation in reservations):
+                SeatReservation.objects.filter(
+                    id__in=[reservation.id for reservation in reservations],
+                    status=SeatReservation.STATUS_RESERVED,
+                ).update(status=SeatReservation.STATUS_EXPIRED)
+                payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
+                payment.raw_provider_payload = payload
+                payment.verified_at = now
+                payment.save(update_fields=['status','raw_provider_payload','verified_at','updated_at'])
+                return False, 'Payment received after reservation expired. Please contact support.'
+
+            if not all(reservation.status == SeatReservation.STATUS_RESERVED for reservation in reservations):
+                if _bookings_exist_for_reservations(reservations):
+                    payment.status = PaymentTransaction.STATUS_CAPTURED
+                    payment.verified_at = payment.verified_at or now
+                    payment.raw_provider_payload = payload or payment.raw_provider_payload
+                    payment.save(update_fields=['status','verified_at','raw_provider_payload','updated_at'])
+                    return True, 'Booking already confirmed.'
+                payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
+                payment.raw_provider_payload = payload
+                payment.save(update_fields=['status','raw_provider_payload','updated_at'])
+                return False, 'Payment received but booking needs review. Please contact support.'
+
+            seat_ids = [reservation.seat_id for reservation in reservations]
+            # select_for_update() gives row-level locking on PostgreSQL.
+            # SQLite has limited row-level locking, but this code is production-ready for PostgreSQL.
+            seats = list(
+                Seat.objects.select_for_update()
+                .filter(id__in=seat_ids)
+                .order_by('id')
+            )
+            if len(seats) != len(seat_ids):
+                payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
+                payment.raw_provider_payload = payload
+                payment.save(update_fields=['status','raw_provider_payload','updated_at'])
+                return False, 'Payment received but booking needs review. Please contact support.'
+
+            existing_bookings = Booking.objects.filter(seat_id__in=seat_ids)
+            if existing_bookings.exists() or any(seat.is_booked for seat in seats):
+                if _bookings_exist_for_reservations(reservations):
+                    payment.status = PaymentTransaction.STATUS_CAPTURED
+                    payment.verified_at = payment.verified_at or now
+                    payment.raw_provider_payload = payload or payment.raw_provider_payload
+                    payment.save(update_fields=['status','verified_at','raw_provider_payload','updated_at'])
+                    return True, 'Booking already confirmed.'
+                payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
+                payment.raw_provider_payload = payload
+                payment.save(update_fields=['status','raw_provider_payload','updated_at'])
+                return False, 'Payment received but booking needs review. Please contact support.'
+
+            seats_by_id = {seat.id: seat for seat in seats}
+            for reservation in reservations:
+                seat = seats_by_id[reservation.seat_id]
+                Booking.objects.create(
+                    user=payment.user,
+                    seat=seat,
+                    movie=reservation.movie,
+                    theater=reservation.theater,
+                )
+                seat.is_booked=True
+                seat.save(update_fields=['is_booked'])
+                reservation.status=SeatReservation.STATUS_CONFIRMED
+                reservation.confirmed_at=now
+                reservation.save(update_fields=['status','confirmed_at'])
+
+            payment.status = PaymentTransaction.STATUS_CAPTURED
+            payment.verified_at = now
+            payment.raw_provider_payload = payload or payment.raw_provider_payload
+            payment.save(update_fields=['status','verified_at','raw_provider_payload','updated_at'])
+            return True, 'Booking confirmed.'
+    except IntegrityError:
+        PaymentTransaction.objects.filter(pk=payment_transaction.pk).update(
+            status=PaymentTransaction.STATUS_REQUIRES_REVIEW,
+            raw_provider_payload=payload,
+        )
+        return False, 'Payment received but booking needs review. Please contact support.'
+
+
 @login_required(login_url='/login/')
 def book_seats(request,theater_id):
     theater=get_object_or_404(Theater,id=theater_id)
@@ -223,79 +460,246 @@ def confirm_reservation(request,reservation_token):
                     expired=True,
                 ),
             )
-        return render(
-            request,
-            'movies/reservation_confirm.html',
-            _reservation_context(reservations),
+        payment_transaction, active_reservations, payment_error, expired = get_or_create_payment_transaction(
+            reservation_token,
+            request.user,
         )
+        reservations = active_reservations or reservations
+        context = _reservation_context(
+            reservations,
+            payment_error,
+            expired=expired,
+        )
+        amount, currency = calculate_reservation_amount(reservations)
+        context.update(
+            {
+                'razorpay_key_id': settings.RAZORPAY_KEY_ID,
+                'razorpay_order_id': payment_transaction.razorpay_order_id if payment_transaction else '',
+                'amount': amount,
+                'amount_rupees': amount / 100,
+                'currency': currency,
+                'payment_transaction': payment_transaction,
+                'payment_configured': bool(payment_transaction and not payment_error),
+            }
+        )
+        return render(request,'movies/reservation_confirm.html',context)
 
-    error_message = None
-    expired = False
+    reservations, error, expired = get_active_reservations_for_payment(
+        reservation_token,
+        request.user,
+    )
+    if error:
+        reservations = _get_user_reservations_or_404(reservation_token, request.user)
+    return render(
+        request,
+        'movies/reservation_confirm.html',
+        _reservation_context(
+            reservations,
+            error or 'Payment verification is required before booking confirmation.',
+            expired=expired,
+        ),
+    )
+
+
+@login_required(login_url='/login/')
+def verify_payment(request,reservation_token):
+    if request.method != 'POST':
+        return redirect('payment_status', reservation_token=reservation_token)
+
+    order_id = request.POST.get('razorpay_order_id', '')
+    payment_id = request.POST.get('razorpay_payment_id', '')
+    signature = request.POST.get('razorpay_signature', '')
+    payload = {
+        'checkout': {
+            'razorpay_order_id': order_id,
+            'razorpay_payment_id': payment_id,
+            'razorpay_signature': signature,
+        }
+    }
+
+    payment_transaction = get_object_or_404(
+        PaymentTransaction,
+        reservation_token=reservation_token,
+        user=request.user,
+        razorpay_order_id=order_id,
+    )
+    reservations = _get_user_reservations_or_404(reservation_token, request.user)
+
+    if payment_transaction.status == PaymentTransaction.STATUS_CAPTURED and _bookings_exist_for_reservations(reservations):
+        return redirect('profile')
+
+    if not verify_razorpay_checkout_signature(order_id, payment_id, signature):
+        payment_transaction.status = PaymentTransaction.STATUS_FAILED
+        payment_transaction.raw_provider_payload = payload
+        payment_transaction.save(update_fields=['status','raw_provider_payload','updated_at'])
+        return redirect('payment_status', reservation_token=reservation_token)
+
+    duplicate_payment = (
+        PaymentTransaction.objects.exclude(pk=payment_transaction.pk)
+        .filter(razorpay_payment_id=payment_id)
+        .exists()
+    )
+    if duplicate_payment:
+        payment_transaction.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
+        payment_transaction.raw_provider_payload = payload
+        payment_transaction.save(update_fields=['status','raw_provider_payload','updated_at'])
+        return redirect('payment_status', reservation_token=reservation_token)
+
+    payment_transaction.razorpay_payment_id = payment_id
+    payment_transaction.raw_provider_payload = payload
+    payment_transaction.save(update_fields=['razorpay_payment_id','raw_provider_payload','updated_at'])
+
+    success, message = finalize_paid_reservation(payment_transaction, payload)
+    if success:
+        return redirect('profile')
+    return redirect('payment_status', reservation_token=reservation_token)
+
+
+@login_required(login_url='/login/')
+def payment_cancelled(request,reservation_token):
+    if request.method != 'POST':
+        return redirect('payment_status', reservation_token=reservation_token)
+
+    transaction_obj = (
+        PaymentTransaction.objects.filter(
+            reservation_token=reservation_token,
+            user=request.user,
+            status=PaymentTransaction.STATUS_CREATED,
+        )
+        .order_by('-created_at')
+        .first()
+    )
+    if transaction_obj:
+        transaction_obj.status = PaymentTransaction.STATUS_CANCELLED
+        transaction_obj.save(update_fields=['status','updated_at'])
+    return JsonResponse({'ok': True})
+
+
+@login_required(login_url='/login/')
+def payment_status(request,reservation_token):
+    transactions = PaymentTransaction.objects.filter(
+        reservation_token=reservation_token,
+        user=request.user,
+    ).order_by('-created_at')
+    transaction_obj = transactions.first()
+    reservations = _get_user_reservations_or_404(reservation_token, request.user)
+    return render(
+        request,
+        'movies/payment_status.html',
+        {
+            'payment_transaction': transaction_obj,
+            'reservations': reservations,
+            'movie': reservations[0].movie,
+            'theater': reservations[0].theater,
+        },
+    )
+
+
+def _webhook_event_id(payload, raw_body):
+    event_id = payload.get('id')
+    if event_id:
+        return event_id
+    entity = _webhook_payment_entity(payload) or _webhook_order_entity(payload) or {}
+    entity_id = entity.get('id', '')
+    event_type = payload.get('event', 'unknown')
+    if entity_id:
+        return f'{event_type}:{entity_id}'
+    return hashlib.sha256(raw_body).hexdigest()
+
+
+def _webhook_payment_entity(payload):
+    return payload.get('payload', {}).get('payment', {}).get('entity')
+
+
+def _webhook_order_entity(payload):
+    return payload.get('payload', {}).get('order', {}).get('entity')
+
+
+def _find_transaction_for_webhook(payment_entity=None, order_entity=None):
+    payment_entity = payment_entity or {}
+    order_entity = order_entity or {}
+    payment_id = payment_entity.get('id')
+    order_id = payment_entity.get('order_id') or order_entity.get('id')
+    transaction_qs = PaymentTransaction.objects.all()
+    if payment_id:
+        transaction_obj = transaction_qs.filter(razorpay_payment_id=payment_id).first()
+        if transaction_obj:
+            return transaction_obj
+    if order_id:
+        return transaction_qs.filter(razorpay_order_id=order_id).first()
+    return None
+
+
+@csrf_exempt
+def razorpay_webhook(request):
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+
+    raw_body = request.body
+    signature = request.headers.get('X-Razorpay-Signature', '')
+    if not verify_razorpay_webhook_signature(raw_body, signature):
+        return HttpResponseBadRequest('Invalid webhook signature')
 
     try:
-        with transaction.atomic():
-            reservations = list(
-                SeatReservation.objects.select_for_update()
-                .select_related('seat', 'theater', 'movie')
-                .filter(reservation_token=reservation_token, user=request.user)
-                .order_by('seat__seat_number')
-            )
-            if not reservations:
-                raise Http404("Reservation not found")
+        payload = json.loads(raw_body.decode('utf-8'))
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest('Invalid JSON')
 
-            now = timezone.now()
-            if not all(reservation.status == SeatReservation.STATUS_RESERVED for reservation in reservations):
-                expired = True
-                error_message = 'This reservation is no longer active.'
-            elif any(reservation.expires_at <= now for reservation in reservations):
-                SeatReservation.objects.filter(
-                    id__in=[reservation.id for reservation in reservations],
-                    status=SeatReservation.STATUS_RESERVED,
-                ).update(status=SeatReservation.STATUS_EXPIRED)
-                expired = True
-                error_message = 'This reservation has expired. Please select seats again.'
-            else:
-                seat_ids = [reservation.seat_id for reservation in reservations]
-                seats = list(
-                    Seat.objects.select_for_update()
-                    .filter(id__in=seat_ids)
-                    .order_by('id')
-                )
+    event_type = payload.get('event', 'unknown')
+    event_id = _webhook_event_id(payload, raw_body)
 
-                if len(seats) != len(seat_ids):
-                    expired = True
-                    error_message = 'This reservation is no longer valid.'
-                elif any(seat.is_booked for seat in seats):
-                    expired = True
-                    error_message = 'One or more seats are already booked.'
-                elif Booking.objects.filter(seat_id__in=seat_ids).exists():
-                    expired = True
-                    error_message = 'One or more seats are already booked.'
-                else:
-                    seats_by_id = {seat.id: seat for seat in seats}
-                    for reservation in reservations:
-                        seat = seats_by_id[reservation.seat_id]
-                        Booking.objects.create(
-                            user=request.user,
-                            seat=seat,
-                            movie=reservation.movie,
-                            theater=reservation.theater,
-                        )
-                        seat.is_booked=True
-                        seat.save(update_fields=['is_booked'])
-                        reservation.status=SeatReservation.STATUS_CONFIRMED
-                        reservation.confirmed_at=now
-                        reservation.save(update_fields=['status','confirmed_at'])
-    except IntegrityError:
-        expired = True
-        error_message = 'One or more seats are already booked.'
-
-    if error_message:
-        reservations = _get_user_reservations_or_404(reservation_token, request.user)
-        return render(
-            request,
-            'movies/reservation_confirm.html',
-            _reservation_context(reservations, error_message, expired=expired),
+    try:
+        webhook_event, created = PaymentWebhookEvent.objects.get_or_create(
+            provider='razorpay',
+            event_id=event_id,
+            defaults={
+                'event_type': event_type,
+                'raw_payload': payload,
+                'signature_valid': True,
+            },
         )
+    except IntegrityError:
+        return JsonResponse({'ok': True, 'duplicate': True})
 
-    return redirect('profile')
+    if not created:
+        return JsonResponse({'ok': True, 'duplicate': True})
+
+    payment_entity = _webhook_payment_entity(payload)
+    order_entity = _webhook_order_entity(payload)
+    transaction_obj = _find_transaction_for_webhook(payment_entity, order_entity)
+    supported_events = {'payment.captured', 'payment.failed', 'order.paid'}
+
+    if event_type not in supported_events:
+        webhook_event.processing_status = PaymentWebhookEvent.STATUS_PROCESSED
+        webhook_event.processed_at = timezone.now()
+        webhook_event.save(update_fields=['processing_status','processed_at'])
+        return JsonResponse({'ok': True, 'ignored': True})
+
+    if not transaction_obj:
+        webhook_event.processing_status = PaymentWebhookEvent.STATUS_FAILED
+        webhook_event.processed_at = timezone.now()
+        webhook_event.save(update_fields=['processing_status','processed_at'])
+        return JsonResponse({'ok': True, 'transaction_found': False})
+
+    raw_payload = {'webhook': payload}
+    if event_type == 'payment.failed':
+        if not transaction_obj.is_finalized():
+            transaction_obj.status = PaymentTransaction.STATUS_FAILED
+            transaction_obj.raw_provider_payload = raw_payload
+            transaction_obj.save(update_fields=['status','raw_provider_payload','updated_at'])
+        webhook_event.processing_status = PaymentWebhookEvent.STATUS_PROCESSED
+        webhook_event.processed_at = timezone.now()
+        webhook_event.save(update_fields=['processing_status','processed_at'])
+        return JsonResponse({'ok': True})
+
+    payment_id = (payment_entity or {}).get('id')
+    if payment_id and not transaction_obj.razorpay_payment_id:
+        transaction_obj.razorpay_payment_id = payment_id
+        transaction_obj.raw_provider_payload = raw_payload
+        transaction_obj.save(update_fields=['razorpay_payment_id','raw_provider_payload','updated_at'])
+
+    finalize_paid_reservation(transaction_obj, raw_payload)
+    webhook_event.processing_status = PaymentWebhookEvent.STATUS_PROCESSED
+    webhook_event.processed_at = timezone.now()
+    webhook_event.save(update_fields=['processing_status','processed_at'])
+    return JsonResponse({'ok': True})
