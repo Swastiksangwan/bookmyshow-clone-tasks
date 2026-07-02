@@ -752,3 +752,11 @@ Next instruction needed:
 ```text
 Please implement Task 3 using this plan.
 ```
+
+## Production Timeout Note
+
+The demo reservation window is 2 minutes because Task 2 required a short temporary seat lock. This is useful for testing timeout behavior.
+
+In a production ticket booking system, the reservation/payment window should usually be increased to around 5–10 minutes so users have enough time to complete checkout. The safety rule should remain the same: if payment completes after the reservation expires, the backend must not create a booking automatically. Instead, the payment should be marked `REQUIRES_REVIEW` for refund/reconciliation handling.
+
+This project already follows that safety rule: expired reservations do not create bookings, and late successful payments are recorded for review instead of risking double booking.

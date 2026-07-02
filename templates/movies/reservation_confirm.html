@@ -24,23 +24,47 @@
             {{ expires_at|date:"F d, Y H:i:s" }}
           </p>
 
+          <p>
+            <strong>Total amount:</strong>
+            {{ currency }} {{ amount_rupees|floatformat:2 }}
+          </p>
+
           {% if error %}
           <div class="alert alert-danger" role="alert">{{ error }}</div>
           {% endif %}
 
           {% if not expired %}
           <div class="alert alert-info" role="alert">
-            Your seats are reserved for 2 minutes. Confirm booking before the timer expires.
+            Your seats are reserved for 2 minutes. Complete payment before the timer expires.
           </div>
-          <form method="post">
+
+          {% if payment_configured %}
+          <button type="button" id="pay-button" class="btn btn-success">
+            Pay Now
+          </button>
+          <form
+            method="post"
+            action="{% url 'payment_verify' reservations.0.reservation_token %}"
+            id="payment-verify-form"
+            class="d-none"
+          >
             {% csrf_token %}
-            <button type="submit" class="btn btn-success">
-              Confirm Booking
-            </button>
+            <input type="hidden" name="razorpay_order_id" id="razorpay_order_id" />
+            <input type="hidden" name="razorpay_payment_id" id="razorpay_payment_id" />
+            <input type="hidden" name="razorpay_signature" id="razorpay_signature" />
+          </form>
+          <div id="payment-message" class="text-muted mt-3"></div>
+          {% else %}
+          <div class="alert alert-warning" role="alert">
+            Payment gateway is not configured. Add Razorpay test keys to environment variables.
+          </div>
+          {% endif %}
+
+          <div class="mt-3">
             <a href="{% url 'book_seats' theater.id %}" class="btn btn-outline-secondary">
               Back to Seats
             </a>
-          </form>
+          </div>
           {% else %}
           <a href="{% url 'book_seats' theater.id %}" class="btn btn-primary">
             Select Seats Again
@@ -51,4 +75,44 @@
     </div>
   </div>
 </div>
+
+{% if payment_configured %}
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var payButton = document.getElementById("pay-button");
+    var verifyForm = document.getElementById("payment-verify-form");
+    var message = document.getElementById("payment-message");
+
+    payButton.addEventListener("click", function () {
+      var checkout = new Razorpay({
+        key: "{{ razorpay_key_id }}",
+        amount: "{{ amount }}",
+        currency: "{{ currency }}",
+        order_id: "{{ razorpay_order_id }}",
+        name: "BookMySeat",
+        description: "{{ movie.name }} - {{ theater.name }}",
+        handler: function (response) {
+          document.getElementById("razorpay_order_id").value = response.razorpay_order_id;
+          document.getElementById("razorpay_payment_id").value = response.razorpay_payment_id;
+          document.getElementById("razorpay_signature").value = response.razorpay_signature;
+          verifyForm.submit();
+        },
+        modal: {
+          ondismiss: function () {
+            message.textContent = "Payment was cancelled. You can retry while the reservation is active.";
+            fetch("{% url 'payment_cancelled' reservations.0.reservation_token %}", {
+              method: "POST",
+              headers: {
+                "X-CSRFToken": "{{ csrf_token }}",
+              },
+            });
+          }
+        }
+      });
+      checkout.open();
+    });
+  });
+</script>
+{% endif %}
 {% endblock %}

@@ -79,3 +79,91 @@ class Booking(models.Model):
     booked_at=models.DateTimeField(auto_now_add=True)
     def __str__(self):
         return f'Booking by{self.user.username} for {self.seat.seat_number} at {self.theater.name}'
+
+class PaymentTransaction(models.Model):
+    STATUS_CREATED = "CREATED"
+    STATUS_AUTHORIZED = "AUTHORIZED"
+    STATUS_CAPTURED = "CAPTURED"
+    STATUS_FAILED = "FAILED"
+    STATUS_CANCELLED = "CANCELLED"
+    STATUS_EXPIRED = "EXPIRED"
+    STATUS_BOOKING_PENDING = "BOOKING_PENDING"
+    STATUS_REQUIRES_REVIEW = "REQUIRES_REVIEW"
+
+    STATUS_CHOICES = [
+        (STATUS_CREATED, "Created"),
+        (STATUS_AUTHORIZED, "Authorized"),
+        (STATUS_CAPTURED, "Captured"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+        (STATUS_EXPIRED, "Expired"),
+        (STATUS_BOOKING_PENDING, "Booking pending"),
+        (STATUS_REQUIRES_REVIEW, "Requires review"),
+    ]
+
+    user = models.ForeignKey(User,on_delete=models.CASCADE)
+    reservation_token = models.UUIDField(db_index=True)
+    razorpay_order_id = models.CharField(max_length=100,unique=True)
+    razorpay_payment_id = models.CharField(max_length=100,null=True,blank=True,unique=True)
+    amount = models.PositiveIntegerField()
+    currency = models.CharField(max_length=10,default="INR")
+    status = models.CharField(max_length=30,choices=STATUS_CHOICES,default=STATUS_CREATED)
+    idempotency_key = models.CharField(max_length=255,unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    verified_at = models.DateTimeField(null=True,blank=True)
+    raw_provider_payload = models.JSONField(default=dict,blank=True)
+
+    def is_successful(self):
+        return self.status == self.STATUS_CAPTURED
+
+    def is_finalized(self):
+        return self.status in {
+            self.STATUS_CAPTURED,
+            self.STATUS_FAILED,
+            self.STATUS_CANCELLED,
+            self.STATUS_EXPIRED,
+            self.STATUS_REQUIRES_REVIEW,
+        }
+
+    def __str__(self):
+        return f'{self.razorpay_order_id} ({self.status})'
+
+class PaymentWebhookEvent(models.Model):
+    STATUS_RECEIVED = "RECEIVED"
+    STATUS_PROCESSED = "PROCESSED"
+    STATUS_IGNORED_DUPLICATE = "IGNORED_DUPLICATE"
+    STATUS_FAILED = "FAILED"
+    STATUS_INVALID_SIGNATURE = "INVALID_SIGNATURE"
+
+    STATUS_CHOICES = [
+        (STATUS_RECEIVED, "Received"),
+        (STATUS_PROCESSED, "Processed"),
+        (STATUS_IGNORED_DUPLICATE, "Ignored duplicate"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_INVALID_SIGNATURE, "Invalid signature"),
+    ]
+
+    provider = models.CharField(max_length=50,default="razorpay")
+    event_id = models.CharField(max_length=255)
+    event_type = models.CharField(max_length=100)
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True,blank=True)
+    processing_status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_RECEIVED,
+    )
+    raw_payload = models.JSONField(default=dict,blank=True)
+    signature_valid = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "event_id"],
+                name="unique_provider_webhook_event",
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.provider}:{self.event_type}:{self.processing_status}'

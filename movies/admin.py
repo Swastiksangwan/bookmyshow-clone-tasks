@@ -1,5 +1,13 @@
 from django.contrib import admin
-from .models import Movie, Theater, Seat,Booking, SeatReservation
+from .models import (
+    Booking,
+    Movie,
+    PaymentTransaction,
+    PaymentWebhookEvent,
+    Seat,
+    SeatReservation,
+    Theater,
+)
 
 @admin.register(Movie)
 class MovieAdmin(admin.ModelAdmin):
@@ -37,3 +45,44 @@ class SeatReservationAdmin(admin.ModelAdmin):
         'movie__name',
         'theater__name',
     ]
+
+@admin.register(PaymentTransaction)
+class PaymentTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        'user',
+        'reservation_token',
+        'razorpay_order_id',
+        'razorpay_payment_id',
+        'amount',
+        'currency',
+        'status',
+        'created_at',
+        'updated_at',
+        'verified_at',
+    ]
+    list_filter = ['status', 'currency', 'created_at']
+    search_fields = [
+        'user__username',
+        'reservation_token',
+        'razorpay_order_id',
+        'razorpay_payment_id',
+    ]
+
+@admin.register(PaymentWebhookEvent)
+class PaymentWebhookEventAdmin(admin.ModelAdmin):
+    list_display = [
+        'provider',
+        'event_id',
+        'event_type',
+        'processing_status',
+        'signature_valid',
+        'received_at',
+        'processed_at',
+    ]
+    list_filter = [
+        'provider',
+        'event_type',
+        'processing_status',
+        'signature_valid',
+    ]
+    search_fields = ['event_id', 'event_type']
