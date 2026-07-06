@@ -105,6 +105,16 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
     DATABASES['default'] = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
 
+# Local in-memory cache is enough for beginner local development.
+# For production or multi-process deployments, use a shared cache such as Redis.
+# The admin analytics dashboard uses a short TTL for near-real-time metrics.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'bookmyseat-admin-analytics',
+    }
+}
+
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
 

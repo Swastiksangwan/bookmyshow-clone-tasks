@@ -62,6 +62,11 @@ class SeatReservation(models.Model):
     confirmed_at = models.DateTimeField(null=True,blank=True)
     reservation_token = models.UUIDField(default=uuid.uuid4,db_index=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "expires_at"], name="reservation_status_exp_idx"),
+        ]
+
     def has_expired(self):
         return self.expires_at <= timezone.now()
 
@@ -77,6 +82,14 @@ class Booking(models.Model):
     movie=models.ForeignKey(Movie,on_delete=models.CASCADE)
     theater=models.ForeignKey(Theater,on_delete=models.CASCADE)
     booked_at=models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["booked_at"], name="booking_booked_at_idx"),
+            models.Index(fields=["movie", "booked_at"], name="booking_movie_time_idx"),
+            models.Index(fields=["theater", "booked_at"], name="booking_theater_time_idx"),
+        ]
+
     def __str__(self):
         return f'Booking by{self.user.username} for {self.seat.seat_number} at {self.theater.name}'
 
@@ -113,6 +126,12 @@ class PaymentTransaction(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     verified_at = models.DateTimeField(null=True,blank=True)
     raw_provider_payload = models.JSONField(default=dict,blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "verified_at"], name="payment_status_verified_idx"),
+            models.Index(fields=["status", "created_at"], name="payment_status_created_idx"),
+        ]
 
     def is_successful(self):
         return self.status == self.STATUS_CAPTURED

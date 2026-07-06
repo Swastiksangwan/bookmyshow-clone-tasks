@@ -5,13 +5,20 @@ from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, Group, User
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
+from .analytics import (
+    can_view_analytics,
+    clear_admin_analytics_cache,
+    get_admin_analytics,
+    get_cached_admin_analytics,
+)
 from .models import (
     Booking,
     Movie,
@@ -650,3 +657,297 @@ class PaymentFlowTests(SeatReservationFlowTests):
         self.assertEqual(transaction_obj.status, PaymentTransaction.STATUS_CAPTURED)
         self.assertEqual(reservation.status, SeatReservation.STATUS_CONFIRMED)
         self.assertTrue(self.seat_a1.is_booked)
+
+
+class AdminAnalyticsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username='analytics_user',
+            password='password123',
+        )
+        self.staff_user = User.objects.create_user(
+            username='analytics_staff',
+            password='password123',
+            is_staff=True,
+        )
+        self.superuser = User.objects.create_superuser(
+            username='analytics_superuser',
+            email='super@example.com',
+            password='password123',
+        )
+        self.analytics_group = Group.objects.create(name='analytics_admin')
+        self.group_user = User.objects.create_user(
+            username='analytics_group_user',
+            password='password123',
+        )
+        self.group_user.groups.add(self.analytics_group)
+
+    def tearDown(self):
+        cache.clear()
+
+    def create_movie(self, name):
+        return Movie.objects.create(
+            name=name,
+            image='movies/test.jpg',
+            rating='8.5',
+            cast='Demo Cast',
+            description='Demo movie.',
+        )
+
+    def create_theater_with_seats(self, movie_name, theater_name, seat_count):
+        movie = self.create_movie(movie_name)
+        theater = Theater.objects.create(
+            name=theater_name,
+            movie=movie,
+            time=timezone.now() + timedelta(days=1),
+        )
+        seats = [
+            Seat.objects.create(theater=theater, seat_number=f'A{index + 1}')
+            for index in range(seat_count)
+        ]
+        return movie, theater, seats
+
+    def create_booking(self, seat, user=None, booked_at=None):
+        booking = Booking.objects.create(
+            user=user or self.user,
+            seat=seat,
+            movie=seat.theater.movie,
+            theater=seat.theater,
+        )
+        if booked_at is not None:
+            Booking.objects.filter(pk=booking.pk).update(booked_at=booked_at)
+            booking.refresh_from_db()
+        return booking
+
+    def create_payment(
+        self,
+        status,
+        amount=20000,
+        verified_at=None,
+        created_at=None,
+        suffix='1',
+    ):
+        transaction_obj = PaymentTransaction.objects.create(
+            user=self.user,
+            reservation_token='00000000-0000-0000-0000-000000000001',
+            razorpay_order_id=f'order_analytics_{suffix}',
+            razorpay_payment_id=(
+                f'pay_analytics_{suffix}'
+                if status == PaymentTransaction.STATUS_CAPTURED
+                else None
+            ),
+            amount=amount,
+            currency='INR',
+            status=status,
+            idempotency_key=f'analytics:{suffix}',
+            verified_at=verified_at,
+        )
+        updates = {}
+        if created_at is not None:
+            updates['created_at'] = created_at
+        if verified_at is not None:
+            updates['verified_at'] = verified_at
+        if updates:
+            PaymentTransaction.objects.filter(pk=transaction_obj.pk).update(**updates)
+            transaction_obj.refresh_from_db()
+        return transaction_obj
+
+    def test_permission_helper(self):
+        self.assertFalse(can_view_analytics(AnonymousUser()))
+        self.assertFalse(can_view_analytics(self.user))
+        self.assertTrue(can_view_analytics(self.staff_user))
+        self.assertTrue(can_view_analytics(self.superuser))
+        self.assertTrue(can_view_analytics(self.group_user))
+
+    def test_dashboard_access_control(self):
+        response = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response['Location'])
+
+        self.client.login(username='analytics_user', password='password123')
+        response = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(response.status_code, 403)
+        self.client.logout()
+
+        self.client.login(username='analytics_staff', password='password123')
+        response = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Admin Analytics Dashboard')
+        self.client.logout()
+
+        self.client.login(username='analytics_superuser', password='password123')
+        response = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        RAZORPAY_KEY_SECRET='server-secret',
+        RAZORPAY_WEBHOOK_SECRET='webhook-secret',
+    )
+    def test_api_access_control_and_secret_safety(self):
+        self.client.login(username='analytics_user', password='password123')
+        response = self.client.get(reverse('admin_dashboard_api'))
+        self.assertEqual(response.status_code, 403)
+        self.client.logout()
+
+        self.client.login(username='analytics_staff', password='password123')
+        response = self.client.get(reverse('admin_dashboard_api'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('revenue', data)
+        content = response.content.decode('utf-8')
+        self.assertNotIn('server-secret', content)
+        self.assertNotIn('webhook-secret', content)
+        self.assertNotIn('raw_provider_payload', content)
+
+    def test_revenue_aggregation_uses_captured_payments_only(self):
+        now = timezone.now()
+        self.create_payment(
+            PaymentTransaction.STATUS_CAPTURED,
+            amount=10000,
+            verified_at=now - timedelta(minutes=5),
+            suffix='today',
+        )
+        self.create_payment(
+            PaymentTransaction.STATUS_CAPTURED,
+            amount=30000,
+            verified_at=now - timedelta(days=2),
+            suffix='week',
+        )
+        self.create_payment(
+            PaymentTransaction.STATUS_CAPTURED,
+            amount=50000,
+            verified_at=now - timedelta(days=40),
+            suffix='old',
+        )
+        self.create_payment(
+            PaymentTransaction.STATUS_FAILED,
+            amount=90000,
+            verified_at=now,
+            suffix='failed',
+        )
+
+        analytics = get_admin_analytics()
+
+        self.assertEqual(analytics['revenue']['today_paise'], 10000)
+        self.assertEqual(analytics['revenue']['last_7_days_paise'], 40000)
+        self.assertEqual(analytics['revenue']['today_rupees'], 100.0)
+
+    def test_popular_movies_and_busiest_theaters(self):
+        movie_a, theater_a, seats_a = self.create_theater_with_seats(
+            'Popular A',
+            'Theater A',
+            4,
+        )
+        movie_b, theater_b, seats_b = self.create_theater_with_seats(
+            'Popular B',
+            'Theater B',
+            2,
+        )
+        self.create_booking(seats_a[0])
+        self.create_booking(seats_b[0])
+        self.create_booking(seats_b[1])
+
+        analytics = get_admin_analytics()
+
+        self.assertEqual(analytics['popular_movies'][0]['movie_name'], movie_b.name)
+        self.assertEqual(analytics['popular_movies'][0]['booking_count'], 2)
+        self.assertEqual(analytics['popular_movies'][1]['movie_name'], movie_a.name)
+        self.assertEqual(analytics['popular_movies'][1]['booking_count'], 1)
+
+        self.assertEqual(
+            analytics['busiest_theaters'][0]['theater_name'],
+            theater_b.name,
+        )
+        self.assertEqual(analytics['busiest_theaters'][0]['booked_seats'], 2)
+        self.assertEqual(analytics['busiest_theaters'][0]['total_seats'], 2)
+        self.assertEqual(analytics['busiest_theaters'][0]['occupancy_rate'], 100.0)
+        self.assertEqual(
+            analytics['busiest_theaters'][1]['theater_name'],
+            theater_a.name,
+        )
+        self.assertEqual(analytics['busiest_theaters'][1]['occupancy_rate'], 25.0)
+
+    def test_peak_booking_hours(self):
+        movie, theater, seats = self.create_theater_with_seats(
+            'Peak Movie',
+            'Peak Theater',
+            3,
+        )
+        base = timezone.now().replace(minute=0, second=0, microsecond=0)
+        hour_14 = base.replace(hour=14)
+        hour_9 = base.replace(hour=9)
+        self.create_booking(seats[0], booked_at=hour_14)
+        self.create_booking(seats[1], booked_at=hour_14)
+        self.create_booking(seats[2], booked_at=hour_9)
+
+        analytics = get_admin_analytics()
+
+        self.assertEqual(analytics['peak_booking_hours'][0]['hour'], 14)
+        self.assertEqual(analytics['peak_booking_hours'][0]['booking_count'], 2)
+        self.assertEqual(analytics['peak_booking_hours'][0]['label'], '14:00 - 14:59')
+
+    def test_cancellation_rate(self):
+        self.create_payment(PaymentTransaction.STATUS_CANCELLED, suffix='cancelled1')
+        self.create_payment(PaymentTransaction.STATUS_CANCELLED, suffix='cancelled2')
+        self.create_payment(PaymentTransaction.STATUS_FAILED, suffix='failed1')
+        self.create_payment(
+            PaymentTransaction.STATUS_CAPTURED,
+            verified_at=timezone.now(),
+            suffix='captured1',
+        )
+
+        analytics = get_admin_analytics()
+
+        self.assertEqual(analytics['cancellation_rate']['total_attempts'], 4)
+        self.assertEqual(analytics['cancellation_rate']['cancelled_attempts'], 2)
+        self.assertEqual(analytics['cancellation_rate']['cancellation_rate'], 50.0)
+
+    def test_cancellation_rate_without_attempts_is_zero(self):
+        analytics = get_admin_analytics()
+
+        self.assertEqual(analytics['cancellation_rate']['total_attempts'], 0)
+        self.assertEqual(analytics['cancellation_rate']['cancelled_attempts'], 0)
+        self.assertEqual(analytics['cancellation_rate']['cancellation_rate'], 0)
+
+    def test_cached_analytics_reuses_cached_result_until_cleared(self):
+        first = get_cached_admin_analytics()
+        self.create_payment(
+            PaymentTransaction.STATUS_CAPTURED,
+            amount=20000,
+            verified_at=timezone.now(),
+            suffix='cached',
+        )
+        second = get_cached_admin_analytics()
+        self.assertEqual(first, second)
+
+        clear_admin_analytics_cache()
+        third = get_cached_admin_analytics()
+        self.assertEqual(third['revenue']['today_paise'], 20000)
+
+    def test_generate_analytics_demo_data_command(self):
+        output = StringIO()
+
+        call_command('generate_analytics_demo_data', bookings=25, stdout=output)
+
+        self.assertGreaterEqual(Booking.objects.count(), 25)
+        self.assertGreaterEqual(PaymentTransaction.objects.count(), 25)
+        self.assertIn('Demo run:', output.getvalue())
+
+    def test_create_demo_admin_command_hashes_password(self):
+        output = StringIO()
+
+        call_command(
+            'create_demo_admin',
+            username='demo_admin_test',
+            email='demo@example.com',
+            password='DemoAdmin@12345',
+            stdout=output,
+        )
+
+        user = User.objects.get(username='demo_admin_test')
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.check_password('DemoAdmin@12345'))
+        self.assertNotEqual(user.password, 'DemoAdmin@12345')
+        self.assertIn('Demo-only credentials', output.getvalue())
