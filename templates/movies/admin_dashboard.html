@@ -1,0 +1,176 @@
+{% extends "users/basic.html" %}
+
+{% block title %}Admin Analytics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container py-5 admin-dashboard">
+  <div class="d-flex justify-content-between align-items-start flex-wrap mb-4">
+    <div>
+      <h1 class="h2 mb-2">Admin Analytics Dashboard</h1>
+      <p class="text-muted mb-0">
+        Near-real-time analytics cached for {{ analytics.cache_ttl_seconds }} seconds.
+      </p>
+    </div>
+    <div class="text-muted mt-2">
+      Generated: {{ analytics.generated_at }}
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-4 mb-3">
+      <div class="card analytics-card h-100">
+        <div class="card-body">
+          <p class="text-muted mb-1">Revenue Today</p>
+          <h2 class="h3 mb-0">INR {{ analytics.revenue.today_rupees|floatformat:2 }}</h2>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="card analytics-card h-100">
+        <div class="card-body">
+          <p class="text-muted mb-1">Revenue Last 7 Days</p>
+          <h2 class="h3 mb-0">INR {{ analytics.revenue.last_7_days_rupees|floatformat:2 }}</h2>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="card analytics-card h-100">
+        <div class="card-body">
+          <p class="text-muted mb-1">Revenue Current Month</p>
+          <h2 class="h3 mb-0">INR {{ analytics.revenue.current_month_rupees|floatformat:2 }}</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-4 mb-4">
+      <div class="card analytics-card h-100">
+        <div class="card-body">
+          <p class="text-muted mb-1">Cancellation Rate</p>
+          <h2 class="h3 mb-2">
+            {{ analytics.cancellation_rate.cancellation_rate|floatformat:2 }}%
+          </h2>
+          <p class="mb-0 text-muted">
+            {{ analytics.cancellation_rate.cancelled_attempts }}
+            cancelled of
+            {{ analytics.cancellation_rate.total_attempts }}
+            payment attempts this month
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-6 mb-4">
+      <div class="card h-100">
+        <div class="card-header bg-dark text-white">
+          Most Popular Movies
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Movie</th>
+                <th>Bookings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for movie in analytics.popular_movies %}
+              <tr>
+                <td>{{ forloop.counter }}</td>
+                <td>{{ movie.movie_name }}</td>
+                <td>{{ movie.booking_count }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="3" class="text-muted">No booking data yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6 mb-4">
+      <div class="card h-100">
+        <div class="card-header bg-dark text-white">
+          Peak Booking Hours
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped mb-0">
+            <thead>
+              <tr>
+                <th>Hour</th>
+                <th>Bookings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for hour in analytics.peak_booking_hours %}
+              <tr>
+                <td>{{ hour.label }}</td>
+                <td>{{ hour.booking_count }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="2" class="text-muted">No booking hour data yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header bg-dark text-white">
+      Busiest Theaters
+    </div>
+    <div class="table-responsive">
+      <table class="table table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Theater</th>
+            <th>Movie</th>
+            <th>Show Time</th>
+            <th>Booked Seats</th>
+            <th>Total Seats</th>
+            <th>Occupancy</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for theater in analytics.busiest_theaters %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ theater.theater_name }}</td>
+            <td>{{ theater.movie_name }}</td>
+            <td>{{ theater.show_time }}</td>
+            <td>{{ theater.booked_seats }}</td>
+            <td>{{ theater.total_seats }}</td>
+            <td>{{ theater.occupancy_rate|floatformat:2 }}%</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="text-muted">No theater occupancy data yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<style>
+  .admin-dashboard .analytics-card {
+    border-left: 4px solid #007bff;
+  }
+  .admin-dashboard .table th {
+    white-space: nowrap;
+  }
+</style>
+{% endblock %}

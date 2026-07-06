@@ -5,13 +5,16 @@ import uuid
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponseBadRequest, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import render, redirect ,get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 
+from .analytics import can_view_analytics, get_cached_admin_analytics
 from .models import (
     Booking,
     Movie,
@@ -50,6 +53,24 @@ def theater_list(request,movie_id):
     movie = get_object_or_404(Movie,id=movie_id)
     theaters=Theater.objects.filter(movie=movie)
     return render(request,'movies/theater_list.html',{'movie':movie,'theaters':theaters})
+
+
+@login_required(login_url='/login/')
+@never_cache
+def admin_dashboard(request):
+    if not can_view_analytics(request.user):
+        raise PermissionDenied("You do not have permission to view analytics.")
+    analytics = get_cached_admin_analytics()
+    return render(request,'movies/admin_dashboard.html',{'analytics':analytics})
+
+
+@login_required(login_url='/login/')
+@never_cache
+def admin_dashboard_api(request):
+    if not can_view_analytics(request.user):
+        return JsonResponse({'detail':'Forbidden'}, status=403)
+    analytics = get_cached_admin_analytics()
+    return JsonResponse(analytics, safe=True)
 
 
 def _expire_reservations(now=None, theater=None, seat_ids=None, reservation_token=None, user=None):
