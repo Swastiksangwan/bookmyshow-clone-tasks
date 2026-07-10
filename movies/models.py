@@ -7,6 +7,28 @@ from django.utils import timezone
 from .validators import validate_youtube_url
 
 
+class Genre(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=120, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Language(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    code = models.SlugField(max_length=20, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Movie(models.Model):
     name= models.CharField(max_length=255)
     image= models.ImageField(upload_to="movies/")
@@ -19,6 +41,22 @@ class Movie(models.Model):
         null=True,
         validators=[validate_youtube_url],
     )
+    genres = models.ManyToManyField(Genre, related_name="movies", blank=True)
+    language = models.ForeignKey(
+        Language,
+        related_name="movies",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        db_index=False,
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["name"], name="movie_name_idx"),
+            models.Index(fields=["rating"], name="movie_rating_idx"),
+            models.Index(fields=["language"], name="movie_language_idx"),
+        ]
 
     def __str__(self):
         return self.name

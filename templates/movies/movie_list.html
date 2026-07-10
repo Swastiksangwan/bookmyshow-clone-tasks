@@ -1,111 +1,419 @@
 {% extends "users/basic.html" %}
 
 {% block content %}
-<div class="container py-5">
-    <h1 class="text-center mb-5">Movies</h1>
-
-    <div class="row justify-content-center mb-5">
-        <div class="col-md-8">
-            <form method="GET" action="{% url 'movie_list' %}" class="search-bar">
-                <div class="input-group">
-                    <input
-                        class="form-control form-control-lg"
-                        name="search"
-                        placeholder="Search for Movies, Events, Plays, Sports and Activities"
-                        type="text"
-                        value="{{ request.GET.search|default_if_none:'' }}"
-                        aria-label="Search for movies"
-                    />
-                    <div class="input-group-append">
-                        <button class="btn btn-primary" type="submit">
-                            <i class="fas fa-search"></i> Search
-                        </button>
-                    </div>
-                </div>
-            </form>
-        </div>
+<div class="movie-catalog py-5">
+  <div class="catalog-header d-flex justify-content-between align-items-start flex-wrap mb-4">
+    <div class="mb-3 mb-md-0">
+      <h1 class="catalog-title mb-1">Movies</h1>
+      <p class="text-muted mb-0">
+        {{ result_count }} movie{% if result_count != 1 %}s{% endif %} found
+      </p>
     </div>
+    {% if search_query or selected_genre_names or selected_language_names or selected_sort != "default" %}
+    <a href="{% url 'movie_list' %}" class="btn btn-outline-secondary">
+      Clear Filters
+    </a>
+    {% endif %}
+  </div>
 
-    <div class="row" id="movieList">
-        {% for movie in movies %}
-        <div class="col-md-4 mb-4">
-            <div class="card h-100 shadow-sm">
-                <img src="{{ movie.image.url }}" class="card-img-top" alt="{{ movie.name }}" style="height: 300px; object-fit: cover;">
-                <div class="card-body">
-                    <h5 class="card-title">{{ movie.name }}</h5>
-                    <p class="card-text">
-                        <i class="fas fa-star text-warning"></i> {{ movie.rating }}
-                    </p>
-                    <p class="card-text">
-                        <small class="text-muted">
-                            <i class="fas fa-users"></i> Cast: {{ movie.cast }}
-                        </small>
-                    </p>
-                </div>
-                <div class="card-footer bg-white border-top-0">
-                    <a href="{% url 'movie_detail' movie.id %}" class="btn btn-outline-primary btn-block">
-                        View Details <i class="fas fa-chevron-right ml-2"></i>
-                    </a>
-                </div>
+  <form method="GET" action="{% url 'movie_list' %}" class="movie-filter-form">
+    <div class="row">
+      <aside class="col-lg-3 mb-4">
+        <div class="filter-panel shadow-sm">
+          <div class="filter-section">
+            <label for="movie-search" class="filter-heading">Search</label>
+            <input
+              id="movie-search"
+              class="form-control"
+              name="search"
+              placeholder="Search movies"
+              type="text"
+              value="{{ search_query }}"
+              aria-label="Search movies"
+            />
+          </div>
+
+          <div class="filter-section">
+            <div class="filter-heading">Genres</div>
+            <div class="filter-list">
+              {% for genre in genre_filters %}
+              <div class="custom-control custom-checkbox filter-option">
+                <input
+                  type="checkbox"
+                  class="custom-control-input"
+                  id="genre-{{ genre.slug }}"
+                  name="genres"
+                  value="{{ genre.slug }}"
+                  {% if genre.slug in selected_genres %}checked{% endif %}
+                />
+                <label class="custom-control-label d-flex justify-content-between" for="genre-{{ genre.slug }}">
+                  <span>{{ genre.name }}</span>
+                  <span class="filter-count">{{ genre.movie_count }}</span>
+                </label>
+              </div>
+              {% empty %}
+              <p class="text-muted small mb-0">No genres available.</p>
+              {% endfor %}
             </div>
+          </div>
+
+          <div class="filter-section">
+            <div class="filter-heading">Languages</div>
+            <div class="filter-list">
+              {% for language in language_filters %}
+              <div class="custom-control custom-checkbox filter-option">
+                <input
+                  type="checkbox"
+                  class="custom-control-input"
+                  id="language-{{ language.code }}"
+                  name="languages"
+                  value="{{ language.code }}"
+                  {% if language.code in selected_languages %}checked{% endif %}
+                />
+                <label class="custom-control-label d-flex justify-content-between" for="language-{{ language.code }}">
+                  <span>{{ language.name }}</span>
+                  <span class="filter-count">{{ language.movie_count }}</span>
+                </label>
+              </div>
+              {% empty %}
+              <p class="text-muted small mb-0">No languages available.</p>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="filter-section">
+            <label for="movie-sort" class="filter-heading">Sort</label>
+            <select id="movie-sort" class="form-control" name="sort">
+              {% for value, label in sort_options %}
+              <option value="{{ value }}" {% if selected_sort == value %}selected{% endif %}>
+                {{ label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="filter-actions">
+            <button class="btn btn-primary btn-block" type="submit">
+              Apply Filters
+            </button>
+            <a href="{% url 'movie_list' %}" class="btn btn-link btn-block">
+              Clear Filters
+            </a>
+          </div>
         </div>
-        {% empty %}
-        <div class="col-12 text-center">
-            <p class="lead">No movies found. Try a different search term.</p>
+      </aside>
+
+      <section class="col-lg-9">
+        {% if search_query or selected_genre_names or selected_language_names or selected_sort != "default" %}
+        <div class="active-filter-panel mb-4">
+          <div class="d-flex align-items-center flex-wrap">
+            <span class="active-filter-label mr-2">Active filters</span>
+            {% if search_query %}
+            <span class="filter-chip">Search: {{ search_query }}</span>
+            {% endif %}
+            {% for genre_name in selected_genre_names %}
+            <span class="filter-chip">Genre: {{ genre_name }}</span>
+            {% endfor %}
+            {% for language_name in selected_language_names %}
+            <span class="filter-chip">Language: {{ language_name }}</span>
+            {% endfor %}
+            {% if selected_sort != "default" %}
+              {% for value, label in sort_options %}
+                {% if selected_sort == value %}
+                <span class="filter-chip">Sort: {{ label }}</span>
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            <a href="{% url 'movie_list' %}" class="btn btn-sm btn-outline-secondary ml-auto mt-2 mt-sm-0">
+              Clear
+            </a>
+          </div>
         </div>
-        {% endfor %}
+        {% endif %}
+
+        <div class="row" id="movieList">
+          {% for movie in movies %}
+          <div class="col-md-6 col-xl-4 mb-4">
+            <article class="movie-card card h-100 shadow-sm">
+              <div class="poster-frame">
+                {% if movie.image %}
+                <img
+                  src="{{ movie.image.url }}"
+                  class="movie-poster"
+                  alt="{{ movie.name }}"
+                  onerror="this.classList.add('d-none'); this.nextElementSibling.classList.remove('d-none');"
+                />
+                <div class="poster-placeholder d-none">
+                  <span>No Poster</span>
+                </div>
+                {% else %}
+                <div class="poster-placeholder">
+                  <span>No Poster</span>
+                </div>
+                {% endif %}
+              </div>
+
+              <div class="card-body d-flex flex-column">
+                <h2 class="movie-title h5">{{ movie.name }}</h2>
+
+                <div class="movie-meta mb-2">
+                  <span class="rating-pill">
+                    <i class="fas fa-star"></i> {{ movie.rating }}
+                  </span>
+                  {% if movie.language %}
+                  <span class="language-pill">{{ movie.language.name }}</span>
+                  {% endif %}
+                </div>
+
+                <div class="genre-row mb-3">
+                  {% for genre in movie.genres.all %}
+                  <span class="genre-chip">{{ genre.name }}</span>
+                  {% empty %}
+                  <span class="text-muted small">No genres listed</span>
+                  {% endfor %}
+                </div>
+
+                {% if movie.cast %}
+                <p class="cast-text text-muted small mb-3">
+                  <i class="fas fa-users"></i> {{ movie.cast }}
+                </p>
+                {% endif %}
+
+                <a href="{% url 'movie_detail' movie.id %}" class="btn btn-outline-primary btn-block mt-auto">
+                  View Details <i class="fas fa-chevron-right ml-2"></i>
+                </a>
+              </div>
+            </article>
+          </div>
+          {% empty %}
+          <div class="col-12">
+            <div class="empty-state text-center py-5">
+              <h2 class="h4">No movies found</h2>
+              <p class="text-muted mb-3">Try changing the search text or removing a filter.</p>
+              <a href="{% url 'movie_list' %}" class="btn btn-outline-primary">Clear Filters</a>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        {% if page_obj.paginator.num_pages > 1 %}
+        <nav aria-label="Movie pagination" class="catalog-pagination mt-4">
+          <ul class="pagination justify-content-center align-items-center flex-wrap">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+              <a class="page-link" href="?{{ querystring_without_page }}page={{ page_obj.previous_page_number }}">Previous</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">Previous</span></li>
+            {% endif %}
+
+            <li class="page-item disabled page-status">
+              <span class="page-link">
+                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+              </span>
+            </li>
+
+            {% if page_obj.has_next %}
+            <li class="page-item">
+              <a class="page-link" href="?{{ querystring_without_page }}page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">Next</span></li>
+            {% endif %}
+          </ul>
+        </nav>
+        {% endif %}
+      </section>
     </div>
+  </form>
 </div>
 
-<!-- Bootstrap JS and dependencies -->
-<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
-<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-
-<!-- Font Awesome -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
 
 <style>
-    .card {
-        transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+  .movie-catalog {
+    color: #242830;
+  }
+  .catalog-title {
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .filter-panel {
+    border: 1px solid #e1e5eb;
+    border-radius: 8px;
+    padding: 18px;
+    background: #fff;
+    position: sticky;
+    top: 16px;
+  }
+  .filter-section {
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid #edf0f4;
+  }
+  .filter-section:last-of-type {
+    border-bottom: 0;
+    margin-bottom: 8px;
+  }
+  .filter-heading {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #343a40;
+    letter-spacing: 0;
+  }
+  .filter-list {
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .filter-option {
+    margin-bottom: 8px;
+    min-height: 24px;
+  }
+  .filter-option label {
+    width: 100%;
+    color: #3a3f46;
+  }
+  .filter-count {
+    margin-left: 10px;
+    color: #6c757d;
+    font-size: 0.85rem;
+  }
+  .filter-actions .btn-link {
+    color: #6c757d;
+    text-decoration: none;
+  }
+  .active-filter-panel {
+    border: 1px solid #d7e5ff;
+    background: #f5f9ff;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .active-filter-label {
+    font-weight: 700;
+    color: #2f4054;
+  }
+  .filter-chip,
+  .genre-chip,
+  .language-pill,
+  .rating-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .filter-chip {
+    padding: 6px 9px;
+    margin: 4px 6px 4px 0;
+    background: #fff;
+    border: 1px solid #d9e4f5;
+    color: #36506c;
+    font-size: 0.85rem;
+  }
+  .movie-card {
+    border: 1px solid #e3e7ed;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  }
+  .movie-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 22px rgba(31, 45, 61, 0.12) !important;
+  }
+  .poster-frame {
+    height: 300px;
+    background: #f1f3f6;
+    position: relative;
+    overflow: hidden;
+  }
+  .movie-poster {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
+  .poster-placeholder {
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      linear-gradient(135deg, #eef1f5 0%, #f8f9fb 100%);
+    color: #7a828d;
+    font-weight: 700;
+    border-bottom: 1px solid #e3e7ed;
+  }
+  .movie-title {
+    min-height: 48px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .movie-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rating-pill {
+    padding: 6px 8px;
+    background: #fff6dd;
+    color: #7a5600;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+  .rating-pill i {
+    color: #f4b400;
+    margin-right: 4px;
+  }
+  .language-pill {
+    padding: 6px 8px;
+    background: #eef7f0;
+    color: #27633a;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+  .genre-row {
+    min-height: 28px;
+  }
+  .genre-chip {
+    padding: 5px 7px;
+    margin: 0 4px 5px 0;
+    background: #f1f4f8;
+    color: #53606f;
+    font-size: 0.78rem;
+  }
+  .cast-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .empty-state {
+    border: 1px dashed #cfd6df;
+    border-radius: 8px;
+    background: #fbfcfd;
+  }
+  .catalog-pagination .page-link {
+    border-radius: 6px;
+    margin: 3px;
+  }
+  .catalog-pagination .page-status .page-link {
+    color: #495057;
+    background: #f8f9fa;
+  }
+  @media (max-width: 991.98px) {
+    .filter-panel {
+      position: static;
     }
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
+    .poster-frame,
+    .poster-placeholder {
+      min-height: 260px;
+      height: 260px;
     }
+  }
 </style>
-
-<script>
-    $(document).ready(function() {
-        // Add animation to cards on hover
-        $('.card').hover(
-            function() { $(this).addClass('shadow'); },
-            function() { $(this).removeClass('shadow'); }
-        );
-
-        // Implement client-side filtering
-        $('input[name="search"]').on('input', function() {
-            var searchTerm = $(this).val().toLowerCase();
-            $('#movieList .col-md-4').each(function() {
-                var movieTitle = $(this).find('.card-title').text().toLowerCase();
-                if (movieTitle.includes(searchTerm)) {
-                    $(this).show();
-                } else {
-                    $(this).hide();
-                }
-            });
-        });
-    });
-</script>
-<!-- <h1>Movies</h1>
-<ul>
-    {% for movie in movies%}
-    <li>
-        <img src="{{movie.image.url}}" alt="image" >
-        <strong>{{movie.name}}</strong>{{movie.rating}}
-        <p>Cast:{{movie.cast}}</p>
-        <a href="{% url 'movie_detail' movie.id %}">View Details</a>
-    </li>
-    {% endfor %}
-</ul> -->
 {% endblock %}
