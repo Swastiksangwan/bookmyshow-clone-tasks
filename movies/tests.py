@@ -21,6 +21,8 @@ from .analytics import (
 )
 from .models import (
     Booking,
+    Genre,
+    Language,
     Movie,
     PaymentTransaction,
     PaymentWebhookEvent,
@@ -951,3 +953,224 @@ class AdminAnalyticsTests(TestCase):
         self.assertTrue(user.check_password('DemoAdmin@12345'))
         self.assertNotEqual(user.password, 'DemoAdmin@12345')
         self.assertIn('Demo-only credentials', output.getvalue())
+
+
+class MovieFilteringTests(TestCase):
+    def setUp(self):
+        self.action = Genre.objects.create(name='Action', slug='action')
+        self.drama = Genre.objects.create(name='Drama', slug='drama')
+        self.comedy = Genre.objects.create(name='Comedy', slug='comedy')
+        self.hindi = Language.objects.create(name='Hindi', code='hindi')
+        self.english = Language.objects.create(name='English', code='english')
+        self.tamil = Language.objects.create(name='Tamil', code='tamil')
+
+    def create_filter_movie(self, name, language, genres, rating='8.0'):
+        movie = Movie.objects.create(
+            name=name,
+            image='movies/test.jpg',
+            rating=rating,
+            cast='Filter Cast',
+            description='Filter test movie.',
+            language=language,
+        )
+        movie.genres.set(genres)
+        return movie
+
+    def movie_names(self, response):
+        return [movie.name for movie in response.context['movies']]
+
+    def test_genre_and_language_model_creation(self):
+        self.assertEqual(str(self.action), 'Action')
+        self.assertEqual(str(self.hindi), 'Hindi')
+
+    def test_movie_can_have_genres_and_language(self):
+        movie = self.create_filter_movie(
+            'Assigned Movie',
+            self.hindi,
+            [self.action, self.drama],
+        )
+
+        self.assertEqual(movie.language, self.hindi)
+        self.assertEqual(movie.genres.count(), 2)
+
+    def test_single_genre_filter(self):
+        self.create_filter_movie('Action One', self.hindi, [self.action])
+        self.create_filter_movie('Drama One', self.hindi, [self.drama])
+
+        response = self.client.get(reverse('movie_list'), {'genres': ['action']})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.movie_names(response), ['Action One'])
+
+    def test_multi_genre_filter_uses_or_logic(self):
+        self.create_filter_movie('Action One', self.hindi, [self.action])
+        self.create_filter_movie('Drama One', self.hindi, [self.drama])
+        self.create_filter_movie('Comedy One', self.hindi, [self.comedy])
+
+        response = self.client.get(
+            reverse('movie_list'),
+            {'genres': ['action', 'drama'], 'sort': 'title_asc'},
+        )
+
+        self.assertEqual(self.movie_names(response), ['Action One', 'Drama One'])
+
+    def test_single_language_filter(self):
+        self.create_filter_movie('Hindi Movie', self.hindi, [self.action])
+        self.create_filter_movie('English Movie', self.english, [self.action])
+
+        response = self.client.get(reverse('movie_list'), {'languages': ['hindi']})
+
+        self.assertEqual(self.movie_names(response), ['Hindi Movie'])
+
+    def test_multi_language_filter_uses_or_logic(self):
+        self.create_filter_movie('Hindi Movie', self.hindi, [self.action])
+        self.create_filter_movie('English Movie', self.english, [self.action])
+        self.create_filter_movie('Tamil Movie', self.tamil, [self.action])
+
+        response = self.client.get(
+            reverse('movie_list'),
+            {'languages': ['hindi', 'english'], 'sort': 'title_asc'},
+        )
+
+        self.assertEqual(self.movie_names(response), ['English Movie', 'Hindi Movie'])
+
+    def test_combined_genre_and_language_filters(self):
+        self.create_filter_movie('Hindi Action', self.hindi, [self.action])
+        self.create_filter_movie('English Action', self.english, [self.action])
+        self.create_filter_movie('Hindi Drama', self.hindi, [self.drama])
+
+        response = self.client.get(
+            reverse('movie_list'),
+            {'genres': ['action'], 'languages': ['hindi']},
+        )
+
+        self.assertEqual(self.movie_names(response), ['Hindi Action'])
+
+    def test_search_combines_with_filters(self):
+        self.create_filter_movie('Avengers Action', self.english, [self.action])
+        self.create_filter_movie('Avengers Drama', self.english, [self.drama])
+        self.create_filter_movie('Other Action', self.english, [self.action])
+
+        response = self.client.get(
+            reverse('movie_list'),
+            {'search': 'Avengers', 'genres': ['action']},
+        )
+
+        self.assertEqual(self.movie_names(response), ['Avengers Action'])
+
+    def test_sorting_title_and_rating(self):
+        self.create_filter_movie('Bravo', self.hindi, [self.action], rating='6.0')
+        self.create_filter_movie('Alpha', self.hindi, [self.action], rating='9.5')
+
+        title_response = self.client.get(
+            reverse('movie_list'),
+            {'sort': 'title_asc'},
+        )
+        rating_response = self.client.get(
+            reverse('movie_list'),
+            {'sort': 'rating_desc'},
+        )
+
+        self.assertEqual(self.movie_names(title_response), ['Alpha', 'Bravo'])
+        self.assertEqual(self.movie_names(rating_response), ['Alpha', 'Bravo'])
+
+    def test_invalid_sort_falls_back_to_default(self):
+        first = self.create_filter_movie('First', self.hindi, [self.action])
+        second = self.create_filter_movie('Second', self.hindi, [self.action])
+
+        response = self.client.get(reverse('movie_list'), {'sort': 'not_allowed'})
+
+        self.assertEqual(response.context['selected_sort'], 'default')
+        self.assertEqual(self.movie_names(response), [second.name, first.name])
+
+    def test_popular_sort_uses_booking_count(self):
+        popular = self.create_filter_movie('Popular Movie', self.hindi, [self.action])
+        quiet = self.create_filter_movie('Quiet Movie', self.hindi, [self.action])
+        user = User.objects.create_user(username='popular_user', password='password123')
+        theater_popular = Theater.objects.create(
+            name='Popular Theater',
+            movie=popular,
+            time=timezone.now(),
+        )
+        theater_quiet = Theater.objects.create(
+            name='Quiet Theater',
+            movie=quiet,
+            time=timezone.now(),
+        )
+        seats = [
+            Seat.objects.create(theater=theater_popular, seat_number='A1'),
+            Seat.objects.create(theater=theater_popular, seat_number='A2'),
+            Seat.objects.create(theater=theater_quiet, seat_number='B1'),
+        ]
+        Booking.objects.create(user=user, seat=seats[0], movie=popular, theater=theater_popular)
+        Booking.objects.create(user=user, seat=seats[1], movie=popular, theater=theater_popular)
+        Booking.objects.create(user=user, seat=seats[2], movie=quiet, theater=theater_quiet)
+
+        response = self.client.get(reverse('movie_list'), {'sort': 'popular'})
+
+        self.assertEqual(self.movie_names(response)[:2], ['Popular Movie', 'Quiet Movie'])
+
+    def test_pagination_returns_page_size_and_preserves_query_params(self):
+        for index in range(13):
+            self.create_filter_movie(
+                f'Paged Movie {index + 1}',
+                self.hindi,
+                [self.action],
+            )
+
+        response = self.client.get(
+            reverse('movie_list'),
+            {'genres': ['action'], 'languages': ['hindi'], 'sort': 'rating_desc'},
+        )
+
+        self.assertEqual(len(response.context['movies']), 12)
+        self.assertEqual(response.context['page_obj'].paginator.count, 13)
+        content = response.content.decode('utf-8')
+        self.assertIn('genres=action', content)
+        self.assertIn('languages=hindi', content)
+        self.assertIn('sort=rating_desc', content)
+        self.assertIn('page=2', content)
+
+    def test_dynamic_filter_counts_are_faceted_and_before_pagination(self):
+        for index in range(15):
+            self.create_filter_movie(
+                f'English Action {index + 1}',
+                self.english,
+                [self.action],
+            )
+        self.create_filter_movie('English Drama', self.english, [self.drama])
+        self.create_filter_movie('Hindi Action', self.hindi, [self.action])
+
+        response = self.client.get(
+            reverse('movie_list'),
+            {
+                'genres': ['action'],
+                'languages': ['english'],
+            },
+        )
+
+        genre_counts = {
+            genre.slug: genre.movie_count
+            for genre in response.context['genre_filters']
+        }
+        language_counts = {
+            language.code: language.movie_count
+            for language in response.context['language_filters']
+        }
+
+        self.assertEqual(len(response.context['movies']), 12)
+        self.assertEqual(genre_counts['action'], 15)
+        self.assertEqual(genre_counts['drama'], 1)
+        self.assertEqual(language_counts['english'], 15)
+        self.assertEqual(language_counts['hindi'], 1)
+
+    def test_generate_movie_catalog_demo_data_command(self):
+        output = StringIO()
+
+        call_command('generate_movie_catalog_demo_data', movies=25, stdout=output)
+
+        self.assertGreaterEqual(Movie.objects.count(), 25)
+        self.assertGreaterEqual(Genre.objects.count(), 10)
+        self.assertGreaterEqual(Language.objects.count(), 8)
+        self.assertGreater(Movie.genres.through.objects.count(), 25)
+        self.assertIn('Movies created: 25', output.getvalue())

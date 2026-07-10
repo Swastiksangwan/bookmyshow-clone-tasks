@@ -1,6 +1,8 @@
 from django.contrib import admin
 from .models import (
     Booking,
+    Genre,
+    Language,
     Movie,
     PaymentTransaction,
     PaymentWebhookEvent,
@@ -9,9 +11,23 @@ from .models import (
     Theater,
 )
 
+@admin.register(Genre)
+class GenreAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug']
+    search_fields = ['name', 'slug']
+    prepopulated_fields = {'slug': ('name',)}
+
+@admin.register(Language)
+class LanguageAdmin(admin.ModelAdmin):
+    list_display = ['name', 'code']
+    search_fields = ['name', 'code']
+
 @admin.register(Movie)
 class MovieAdmin(admin.ModelAdmin):
-    list_display = ['name', 'rating', 'cast','description','trailer_url']
+    list_display = ['name', 'rating', 'language', 'trailer_url']
+    list_filter = ['language', 'genres']
+    search_fields = ['name', 'cast', 'description']
+    filter_horizontal = ('genres',)
 
 @admin.register(Theater)
 class TheaterAdmin(admin.ModelAdmin):

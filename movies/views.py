@@ -6,6 +6,8 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.db.models import Count
 from django.http import Http404, HttpResponseBadRequest, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import render, redirect ,get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -17,6 +19,8 @@ from django.views.decorators.csrf import csrf_exempt
 from .analytics import can_view_analytics, get_cached_admin_analytics
 from .models import (
     Booking,
+    Genre,
+    Language,
     Movie,
     PaymentTransaction,
     PaymentWebhookEvent,
@@ -28,14 +32,120 @@ from .validators import extract_youtube_video_id
 
 
 RESERVATION_MINUTES = 2
+MOVIE_PAGE_SIZE = 12
+MOVIE_SORT_OPTIONS = {
+    'default': '-id',
+    'title_asc': 'name',
+    'title_desc': '-name',
+    'rating_desc': '-rating',
+    'rating_asc': 'rating',
+}
+MOVIE_SORT_LABELS = [
+    ('default', 'Newest'),
+    ('title_asc', 'Title A-Z'),
+    ('title_desc', 'Title Z-A'),
+    ('rating_desc', 'Rating high to low'),
+    ('rating_asc', 'Rating low to high'),
+    ('popular', 'Most booked'),
+]
+
+
+def apply_movie_search(queryset, search_query):
+    search_query = (search_query or '').strip()
+    if search_query:
+        return queryset.filter(name__icontains=search_query)
+    return queryset
+
+
+def apply_genre_filter(queryset, selected_genres):
+    if selected_genres:
+        # Genre is many-to-many, so distinct avoids duplicate movie rows after the join.
+        return queryset.filter(genres__slug__in=selected_genres).distinct()
+    return queryset
+
+
+def apply_language_filter(queryset, selected_languages):
+    if selected_languages:
+        # Language is a ForeignKey, so multi-select stays a simple indexed IN lookup.
+        return queryset.filter(language__code__in=selected_languages)
+    return queryset
+
+
+def _selected_params(request, key):
+    return [value for value in request.GET.getlist(key) if value]
+
+
+def _querystring_without_page(request):
+    params = request.GET.copy()
+    params.pop('page', None)
+    encoded = params.urlencode()
+    return f'{encoded}&' if encoded else ''
 
 def movie_list(request):
-    search_query=request.GET.get('search')
-    if search_query:
-        movies=Movie.objects.filter(name__icontains=search_query)
+    search_query=(request.GET.get('search') or '').strip()
+    selected_genres = _selected_params(request, 'genres')
+    selected_languages = _selected_params(request, 'languages')
+    requested_sort = request.GET.get('sort', 'default')
+    selected_sort = requested_sort if requested_sort in dict(MOVIE_SORT_LABELS) else 'default'
+
+    movies = Movie.objects.all()
+    movies = apply_movie_search(movies, search_query)
+    movies = apply_genre_filter(movies, selected_genres)
+    movies = apply_language_filter(movies, selected_languages)
+
+    if selected_sort == 'popular':
+        movies = movies.annotate(
+            booking_count=Count('booking', distinct=True)
+        ).order_by('-booking_count', 'name')
     else:
-        movies=Movie.objects.all()
-    return render(request,'movies/movie_list.html',{'movies':movies})
+        movies = movies.order_by(MOVIE_SORT_OPTIONS[selected_sort])
+
+    # Dynamic counts are calculated before pagination and with database aggregation.
+    genre_count_movies = Movie.objects.all()
+    genre_count_movies = apply_movie_search(genre_count_movies, search_query)
+    genre_count_movies = apply_language_filter(genre_count_movies, selected_languages)
+    genre_filters = Genre.objects.filter(
+        movies__in=genre_count_movies
+    ).annotate(
+        movie_count=Count('movies', distinct=True)
+    ).order_by('name')
+
+    language_count_movies = Movie.objects.all()
+    language_count_movies = apply_movie_search(language_count_movies, search_query)
+    language_count_movies = apply_genre_filter(language_count_movies, selected_genres)
+    language_filters = Language.objects.filter(
+        movies__in=language_count_movies
+    ).annotate(
+        movie_count=Count('movies', distinct=True)
+    ).order_by('name')
+
+    movies = movies.select_related('language').prefetch_related('genres')
+    paginator = Paginator(movies, MOVIE_PAGE_SIZE)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    selected_genre_names = list(
+        Genre.objects.filter(slug__in=selected_genres).values_list('name', flat=True)
+    )
+    selected_language_names = list(
+        Language.objects.filter(code__in=selected_languages).values_list('name', flat=True)
+    )
+
+    context = {
+        'movies':page_obj.object_list,
+        'page_obj':page_obj,
+        'genre_filters':genre_filters,
+        'language_filters':language_filters,
+        'selected_genres':selected_genres,
+        'selected_languages':selected_languages,
+        'selected_genre_names':selected_genre_names,
+        'selected_language_names':selected_language_names,
+        'search_query':search_query,
+        'selected_sort':selected_sort,
+        'sort_options':MOVIE_SORT_LABELS,
+        'querystring_without_page':_querystring_without_page(request),
+        'result_count':paginator.count,
+    }
+    return render(request,'movies/movie_list.html',context)
 
 def movie_detail(request,movie_id):
     movie = get_object_or_404(Movie,id=movie_id)
