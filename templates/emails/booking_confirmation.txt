@@ -1,0 +1,19 @@
+Hi {{ customer_username }},
+
+Your booking is confirmed.
+
+Movie: {{ movie_name }}
+Theater: {{ theater_name }}
+Show time: {{ show_time_display }}
+Seats: {% for seat_number in seat_numbers %}{{ seat_number }}{% if not forloop.last %}, {% endif %}{% endfor %}
+Booking IDs: {% for booking_id in booking_ids %}#{{ booking_id }}{% if not forloop.last %}, {% endif %}{% endfor %}
+
+Payment ID: {{ razorpay_payment_id }}
+Order ID: {{ razorpay_order_id }}
+Total amount: {{ currency }} {{ amount_rupees|floatformat:2 }}
+Confirmed at: {{ confirmed_at_display }}
+
+Please keep this email for your records. If you need help, contact the cinema support team.
+
+Thank you,
+BookMySeat

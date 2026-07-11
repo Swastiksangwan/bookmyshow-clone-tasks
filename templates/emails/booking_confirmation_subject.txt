@@ -1,0 +1,1 @@
+Your BookMySeat ticket for {{ movie_name }}
