@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import (
     Booking,
+    BookingEmailNotification,
     Genre,
     Language,
     Movie,
@@ -102,3 +103,34 @@ class PaymentWebhookEventAdmin(admin.ModelAdmin):
         'signature_valid',
     ]
     search_fields = ['event_id', 'event_type']
+
+@admin.register(BookingEmailNotification)
+class BookingEmailNotificationAdmin(admin.ModelAdmin):
+    list_display = [
+        'user',
+        'recipient_email',
+        'reservation_token',
+        'payment_transaction',
+        'status',
+        'attempt_count',
+        'max_attempts',
+        'next_retry_at',
+        'sent_at',
+        'created_at',
+        'updated_at',
+    ]
+    list_filter = ['status', 'created_at', 'sent_at']
+    search_fields = [
+        'recipient_email',
+        'reservation_token',
+        'payment_transaction__razorpay_payment_id',
+        'payment_transaction__razorpay_order_id',
+        'user__username',
+    ]
+    readonly_fields = [
+        'created_at',
+        'updated_at',
+        'sent_at',
+        'last_error',
+        'payload',
+    ]

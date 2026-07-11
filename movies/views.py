@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 from datetime import timedelta
 
@@ -30,6 +31,8 @@ from .models import (
 )
 from .validators import extract_youtube_video_id
 
+
+logger = logging.getLogger(__name__)
 
 RESERVATION_MINUTES = 2
 MOVIE_PAGE_SIZE = 12
@@ -383,6 +386,25 @@ def _bookings_exist_for_reservations(reservations):
     return Booking.objects.filter(seat_id__in=seat_ids).count() == len(seat_ids)
 
 
+def _enqueue_ticket_email_safely(payment_transaction_id):
+    try:
+        from .email_notifications import enqueue_booking_confirmation_email
+
+        payment_transaction = PaymentTransaction.objects.get(pk=payment_transaction_id)
+        enqueue_booking_confirmation_email(payment_transaction)
+    except Exception as exc:
+        logger.warning(
+            "Booking succeeded, but ticket email could not be queued for payment %s: %s",
+            payment_transaction_id,
+            exc,
+        )
+
+
+def _enqueue_ticket_email_on_commit(payment_transaction):
+    payment_transaction_id = payment_transaction.id
+    transaction.on_commit(lambda: _enqueue_ticket_email_safely(payment_transaction_id))
+
+
 def finalize_paid_reservation(payment_transaction, payment_payload=None):
     payload = payment_payload or {}
     try:
@@ -406,6 +428,7 @@ def finalize_paid_reservation(payment_transaction, payment_payload=None):
                 return False, 'Payment received but booking needs review. Please contact support.'
 
             if payment.status == PaymentTransaction.STATUS_CAPTURED and _bookings_exist_for_reservations(reservations):
+                _enqueue_ticket_email_on_commit(payment)
                 return True, 'Booking already confirmed.'
 
             now = timezone.now()
@@ -426,6 +449,7 @@ def finalize_paid_reservation(payment_transaction, payment_payload=None):
                     payment.verified_at = payment.verified_at or now
                     payment.raw_provider_payload = payload or payment.raw_provider_payload
                     payment.save(update_fields=['status','verified_at','raw_provider_payload','updated_at'])
+                    _enqueue_ticket_email_on_commit(payment)
                     return True, 'Booking already confirmed.'
                 payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
                 payment.raw_provider_payload = payload
@@ -453,6 +477,7 @@ def finalize_paid_reservation(payment_transaction, payment_payload=None):
                     payment.verified_at = payment.verified_at or now
                     payment.raw_provider_payload = payload or payment.raw_provider_payload
                     payment.save(update_fields=['status','verified_at','raw_provider_payload','updated_at'])
+                    _enqueue_ticket_email_on_commit(payment)
                     return True, 'Booking already confirmed.'
                 payment.status = PaymentTransaction.STATUS_REQUIRES_REVIEW
                 payment.raw_provider_payload = payload
@@ -478,6 +503,7 @@ def finalize_paid_reservation(payment_transaction, payment_payload=None):
             payment.verified_at = now
             payment.raw_provider_payload = payload or payment.raw_provider_payload
             payment.save(update_fields=['status','verified_at','raw_provider_payload','updated_at'])
+            _enqueue_ticket_email_on_commit(payment)
             return True, 'Booking confirmed.'
     except IntegrityError:
         PaymentTransaction.objects.filter(pk=payment_transaction.pk).update(
@@ -657,6 +683,7 @@ def verify_payment(request,reservation_token):
     reservations = _get_user_reservations_or_404(reservation_token, request.user)
 
     if payment_transaction.status == PaymentTransaction.STATUS_CAPTURED and _bookings_exist_for_reservations(reservations):
+        _enqueue_ticket_email_safely(payment_transaction.id)
         return redirect('profile')
 
     if not verify_razorpay_checkout_signature(order_id, payment_id, signature):

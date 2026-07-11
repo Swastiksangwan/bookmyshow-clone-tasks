@@ -5,7 +5,9 @@ from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
 
+from django.contrib import admin
 from django.contrib.auth.models import AnonymousUser, Group, User
+from django.core import mail
 from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -19,8 +21,14 @@ from .analytics import (
     get_admin_analytics,
     get_cached_admin_analytics,
 )
+from .email_notifications import (
+    enqueue_booking_confirmation_email,
+    render_booking_confirmation_email,
+    send_booking_confirmation_email,
+)
 from .models import (
     Booking,
+    BookingEmailNotification,
     Genre,
     Language,
     Movie,
@@ -418,6 +426,41 @@ class PaymentFlowTests(SeatReservationFlowTests):
             idempotency_key=f'reservation:{reservation.reservation_token}:razorpay_order:{order_id}',
         )
 
+    def create_captured_booking_context(self, email='user-a@example.com'):
+        self.user_a.email = email
+        self.user_a.save(update_fields=['email'])
+        reservation = self.create_reservation()
+        reservation.status = SeatReservation.STATUS_CONFIRMED
+        reservation.confirmed_at = timezone.now()
+        reservation.save(update_fields=['status', 'confirmed_at'])
+        self.seat_a1.is_booked = True
+        self.seat_a1.save(update_fields=['is_booked'])
+        booking = Booking.objects.create(
+            user=self.user_a,
+            seat=self.seat_a1,
+            movie=self.movie,
+            theater=self.theater,
+        )
+        transaction_obj = self.create_payment_transaction(reservation)
+        transaction_obj.status = PaymentTransaction.STATUS_CAPTURED
+        transaction_obj.razorpay_payment_id = 'pay_email_test'
+        transaction_obj.verified_at = timezone.now()
+        transaction_obj.raw_provider_payload = {
+            'checkout': {
+                'secret_like_value': 'raw-provider-secret-should-not-be-emailed',
+            }
+        }
+        transaction_obj.save(
+            update_fields=[
+                'status',
+                'razorpay_payment_id',
+                'verified_at',
+                'raw_provider_payload',
+                'updated_at',
+            ]
+        )
+        return reservation, booking, transaction_obj
+
     def test_payment_transaction_model_creation(self):
         reservation = self.create_reservation()
         transaction_obj = self.create_payment_transaction(reservation)
@@ -659,6 +702,198 @@ class PaymentFlowTests(SeatReservationFlowTests):
         self.assertEqual(transaction_obj.status, PaymentTransaction.STATUS_CAPTURED)
         self.assertEqual(reservation.status, SeatReservation.STATUS_CONFIRMED)
         self.assertTrue(self.seat_a1.is_booked)
+
+    def test_booking_email_notification_model_creation(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context()
+
+        notification = BookingEmailNotification.objects.create(
+            user=self.user_a,
+            booking=booking,
+            payment_transaction=transaction_obj,
+            reservation_token=reservation.reservation_token,
+            recipient_email='user-a@example.com',
+            subject='Your BookMySeat ticket',
+            payload={'seat_numbers': ['A1']},
+        )
+
+        self.assertEqual(notification.status, BookingEmailNotification.STATUS_PENDING)
+        self.assertTrue(notification.can_retry())
+        self.assertIn('user-a@example.com', str(notification))
+
+    def test_successful_verified_payment_enqueues_ticket_email_once(self):
+        self.user_a.email = 'user-a@example.com'
+        self.user_a.save(update_fields=['email'])
+        self.reserve_seat()
+        reservation = SeatReservation.objects.get(seat=self.seat_a1)
+        transaction_obj = self.create_payment_transaction(reservation)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse('payment_verify', args=[reservation.reservation_token]),
+                {
+                    'razorpay_order_id': transaction_obj.razorpay_order_id,
+                    'razorpay_payment_id': 'pay_test',
+                    'razorpay_signature': self.checkout_signature(),
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(BookingEmailNotification.objects.count(), 1)
+        notification = BookingEmailNotification.objects.get()
+        self.assertEqual(notification.status, BookingEmailNotification.STATUS_PENDING)
+        self.assertEqual(notification.recipient_email, 'user-a@example.com')
+        self.assertEqual(notification.payload['seat_numbers'], ['A1'])
+        self.assertNotIn('raw_provider_payload', notification.payload)
+
+        response = self.client.post(
+            reverse('payment_verify', args=[reservation.reservation_token]),
+            {
+                'razorpay_order_id': transaction_obj.razorpay_order_id,
+                'razorpay_payment_id': 'pay_test',
+                'razorpay_signature': self.checkout_signature(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(BookingEmailNotification.objects.count(), 1)
+
+    def test_captured_webhook_enqueues_ticket_email_once(self):
+        self.user_a.email = 'user-a@example.com'
+        self.user_a.save(update_fields=['email'])
+        reservation = self.create_reservation()
+        transaction_obj = self.create_payment_transaction(reservation)
+        raw_body = json.dumps(
+            {
+                'id': 'evt_capture_email',
+                'event': 'payment.captured',
+                'payload': {
+                    'payment': {
+                        'entity': {
+                            'id': 'pay_email_webhook',
+                            'order_id': transaction_obj.razorpay_order_id,
+                        }
+                    }
+                },
+            },
+            separators=(',', ':'),
+        ).encode('utf-8')
+        signature = self.webhook_signature(raw_body)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse('razorpay_webhook'),
+                data=raw_body,
+                content_type='application/json',
+                HTTP_X_RAZORPAY_SIGNATURE=signature,
+            )
+        duplicate_response = self.client.post(
+            reverse('razorpay_webhook'),
+            data=raw_body,
+            content_type='application/json',
+            HTTP_X_RAZORPAY_SIGNATURE=signature,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(duplicate_response.status_code, 200)
+        self.assertEqual(BookingEmailNotification.objects.count(), 1)
+
+    def test_email_templates_render_subject_text_and_html(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context()
+        notification, created = enqueue_booking_confirmation_email(transaction_obj)
+
+        subject, text_body, html_body = render_booking_confirmation_email(notification)
+
+        self.assertTrue(created)
+        self.assertEqual(subject, 'Your BookMySeat ticket for Reservation Movie')
+        self.assertNotIn('\n', subject)
+        self.assertIn('Movie: Reservation Movie', text_body)
+        self.assertIn('Seat', text_body)
+        self.assertIn('pay_email_test', text_body)
+        self.assertIn('Booking Confirmed', html_body)
+        self.assertIn('Main Theater', html_body)
+
+    @override_settings(
+        EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+        DEFAULT_FROM_EMAIL='BookMySeat <noreply@test.local>',
+    )
+    def test_process_email_queue_sends_email_with_locmem_backend(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context()
+        notification, created = enqueue_booking_confirmation_email(transaction_obj)
+        output = StringIO()
+
+        call_command('process_email_queue', stdout=output)
+
+        notification.refresh_from_db()
+        self.assertEqual(notification.status, BookingEmailNotification.STATUS_SENT)
+        self.assertIsNotNone(notification.sent_at)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('Reservation Movie', mail.outbox[0].body)
+        self.assertIn('Processed 1 email notification(s): 1 sent', output.getvalue())
+
+    def test_failed_email_send_increments_attempt_and_sets_retry(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context()
+        notification, created = enqueue_booking_confirmation_email(transaction_obj)
+
+        with patch(
+            'movies.email_notifications.EmailMultiAlternatives.send',
+            side_effect=Exception('smtp timeout'),
+        ):
+            sent = send_booking_confirmation_email(notification)
+
+        notification.refresh_from_db()
+        self.assertFalse(sent)
+        self.assertEqual(notification.status, BookingEmailNotification.STATUS_FAILED)
+        self.assertEqual(notification.attempt_count, 1)
+        self.assertIsNotNone(notification.next_retry_at)
+        self.assertIn('smtp timeout', notification.last_error)
+
+    def test_max_attempts_stops_queue_retry(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context()
+        notification, created = enqueue_booking_confirmation_email(transaction_obj)
+        notification.status = BookingEmailNotification.STATUS_FAILED
+        notification.attempt_count = notification.max_attempts
+        notification.next_retry_at = None
+        notification.save(update_fields=['status', 'attempt_count', 'next_retry_at'])
+        output = StringIO()
+
+        with patch(
+            'movies.management.commands.process_email_queue.send_booking_confirmation_email'
+        ) as mock_send:
+            call_command('process_email_queue', stdout=output)
+
+        mock_send.assert_not_called()
+        self.assertIn('Processed 0 email notification(s)', output.getvalue())
+
+    def test_missing_user_email_creates_failed_notification_without_crashing(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context(email='')
+
+        notification, created = enqueue_booking_confirmation_email(transaction_obj)
+
+        self.assertTrue(created)
+        self.assertEqual(notification.status, BookingEmailNotification.STATUS_FAILED)
+        self.assertEqual(notification.last_error, 'User email is missing.')
+        self.assertEqual(notification.recipient_email, '')
+
+    @override_settings(
+        RAZORPAY_KEY_SECRET='server-secret',
+        RAZORPAY_WEBHOOK_SECRET='webhook-secret',
+        EMAIL_HOST_PASSWORD='smtp-secret',
+    )
+    def test_email_content_excludes_secrets_and_raw_provider_payload(self):
+        reservation, booking, transaction_obj = self.create_captured_booking_context()
+        notification, created = enqueue_booking_confirmation_email(transaction_obj)
+
+        subject, text_body, html_body = render_booking_confirmation_email(notification)
+        combined = subject + text_body + html_body + json.dumps(notification.payload)
+
+        self.assertNotIn('server-secret', combined)
+        self.assertNotIn('webhook-secret', combined)
+        self.assertNotIn('smtp-secret', combined)
+        self.assertNotIn('raw-provider-secret-should-not-be-emailed', combined)
+        self.assertNotIn('raw_provider_payload', combined)
+
+    def test_booking_email_notification_admin_registered(self):
+        self.assertIn(BookingEmailNotification, admin.site._registry)
 
 
 class AdminAnalyticsTests(TestCase):
