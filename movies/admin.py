@@ -12,38 +12,58 @@ from .models import (
     Theater,
 )
 
+
+class ReadOnlyForNonSuperusersMixin:
+    """Keep public evaluator staff accounts read-only in Django admin."""
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser and super().has_add_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser and super().has_change_permission(
+            request,
+            obj,
+        )
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser and super().has_delete_permission(
+            request,
+            obj,
+        )
+
+
 @admin.register(Genre)
-class GenreAdmin(admin.ModelAdmin):
+class GenreAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = ['name', 'slug']
     search_fields = ['name', 'slug']
     prepopulated_fields = {'slug': ('name',)}
 
 @admin.register(Language)
-class LanguageAdmin(admin.ModelAdmin):
+class LanguageAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = ['name', 'code']
     search_fields = ['name', 'code']
 
 @admin.register(Movie)
-class MovieAdmin(admin.ModelAdmin):
+class MovieAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = ['name', 'rating', 'language', 'trailer_url']
     list_filter = ['language', 'genres']
     search_fields = ['name', 'cast', 'description']
     filter_horizontal = ('genres',)
 
 @admin.register(Theater)
-class TheaterAdmin(admin.ModelAdmin):
+class TheaterAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = ['name', 'movie', 'time']
 
 @admin.register(Seat)
-class SeatAdmin(admin.ModelAdmin):
+class SeatAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = ['theater', 'seat_number', 'is_booked']
 
 @admin.register(Booking)
-class BookingAdmin(admin.ModelAdmin):
+class BookingAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = ['user', 'seat', 'movie','theater','booked_at']
 
 @admin.register(SeatReservation)
-class SeatReservationAdmin(admin.ModelAdmin):
+class SeatReservationAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = [
         'user',
         'seat',
@@ -64,7 +84,7 @@ class SeatReservationAdmin(admin.ModelAdmin):
     ]
 
 @admin.register(PaymentTransaction)
-class PaymentTransactionAdmin(admin.ModelAdmin):
+class PaymentTransactionAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = [
         'user',
         'reservation_token',
@@ -86,7 +106,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     ]
 
 @admin.register(PaymentWebhookEvent)
-class PaymentWebhookEventAdmin(admin.ModelAdmin):
+class PaymentWebhookEventAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = [
         'provider',
         'event_id',
@@ -105,7 +125,7 @@ class PaymentWebhookEventAdmin(admin.ModelAdmin):
     search_fields = ['event_id', 'event_type']
 
 @admin.register(BookingEmailNotification)
-class BookingEmailNotificationAdmin(admin.ModelAdmin):
+class BookingEmailNotificationAdmin(ReadOnlyForNonSuperusersMixin, admin.ModelAdmin):
     list_display = [
         'user',
         'recipient_email',

@@ -1,80 +1,120 @@
 {% extends "users/basic.html" %}
 
+{% block title %}Confirm Reservation | BookMySeat{% endblock %}
+
 {% block content %}
-<div class="container py-5">
+<section class="payment-page py-4">
   <div class="row justify-content-center">
-    <div class="col-lg-8">
-      <div class="card shadow">
-        <div class="card-header bg-dark text-white">
-          <h3 class="mb-0">Confirm Booking</h3>
-        </div>
-        <div class="card-body">
-          <h4>{{ movie.name }}</h4>
-          <p class="text-muted mb-2">{{ theater.name }} | {{ theater.time }}</p>
-
-          <p>
-            <strong>Selected seats:</strong>
-            {% for reservation in reservations %}
-              {{ reservation.seat.seat_number }}{% if not forloop.last %}, {% endif %}
-            {% endfor %}
-          </p>
-
-          <p>
-            <strong>Reserved until:</strong>
-            {{ expires_at|date:"F d, Y H:i:s" }}
-          </p>
-
-          <p>
-            <strong>Total amount:</strong>
-            {{ currency }} {{ amount_rupees|floatformat:2 }}
-          </p>
-
-          {% if error %}
-          <div class="alert alert-danger" role="alert">{{ error }}</div>
-          {% endif %}
-
+    <div class="col-lg-9">
+      <div class="app-card detail-panel">
+        <div class="d-flex justify-content-between align-items-start flex-wrap mb-4">
+          <div class="mr-3">
+            <h1 class="h3 mb-2">Complete Your Booking</h1>
+            <p class="text-muted mb-0">{{ movie.name }} | {{ theater.name }}</p>
+            <p class="text-muted mb-0">{{ theater.time|date:"D, d M Y, h:i A" }}</p>
+          </div>
           {% if not expired %}
-          <div class="alert alert-info" role="alert">
-            Your seats are reserved for 2 minutes. Complete payment before the timer expires.
+          <div class="timer-panel mt-3 mt-md-0">
+            <span class="text-muted small d-block">Reserved time left</span>
+            <strong id="reservation-countdown">Calculating...</strong>
           </div>
-
-          {% if payment_configured %}
-          <button type="button" id="pay-button" class="btn btn-success">
-            Pay Now
-          </button>
-          <form
-            method="post"
-            action="{% url 'payment_verify' reservations.0.reservation_token %}"
-            id="payment-verify-form"
-            class="d-none"
-          >
-            {% csrf_token %}
-            <input type="hidden" name="razorpay_order_id" id="razorpay_order_id" />
-            <input type="hidden" name="razorpay_payment_id" id="razorpay_payment_id" />
-            <input type="hidden" name="razorpay_signature" id="razorpay_signature" />
-          </form>
-          <div id="payment-message" class="text-muted mt-3"></div>
-          {% else %}
-          <div class="alert alert-warning" role="alert">
-            Payment gateway is not configured. Add Razorpay test keys to environment variables.
-          </div>
-          {% endif %}
-
-          <div class="mt-3">
-            <a href="{% url 'book_seats' theater.id %}" class="btn btn-outline-secondary">
-              Back to Seats
-            </a>
-          </div>
-          {% else %}
-          <a href="{% url 'book_seats' theater.id %}" class="btn btn-primary">
-            Select Seats Again
-          </a>
           {% endif %}
         </div>
+
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <div class="booking-summary-grid mb-4">
+          <div>
+            <span class="summary-label">Seats</span>
+            <div class="summary-value">
+              {% for reservation in reservations %}
+              <span class="seat-summary">{{ reservation.seat.seat_number }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          <div>
+            <span class="summary-label">Reserved until</span>
+            <div class="summary-value">{{ expires_at|date:"d M Y, h:i A" }}</div>
+          </div>
+          <div>
+            <span class="summary-label">Total amount</span>
+            <div class="summary-value">{{ currency }} {{ amount_rupees|floatformat:2 }}</div>
+          </div>
+        </div>
+
+        {% if not expired %}
+        <div class="alert alert-info" role="alert">
+          Your seats are held for 2 minutes. Payment must be verified by the server before a booking is created.
+        </div>
+
+        {% if payment_configured %}
+        <button type="button" id="pay-button" class="btn btn-success btn-lg btn-block-mobile">
+          Pay Now
+        </button>
+        <form
+          method="post"
+          action="{% url 'payment_verify' reservations.0.reservation_token %}"
+          id="payment-verify-form"
+          class="d-none"
+        >
+          {% csrf_token %}
+          <input type="hidden" name="razorpay_order_id" id="razorpay_order_id" />
+          <input type="hidden" name="razorpay_payment_id" id="razorpay_payment_id" />
+          <input type="hidden" name="razorpay_signature" id="razorpay_signature" />
+        </form>
+        <div id="payment-message" class="text-muted mt-3" aria-live="polite"></div>
+        {% else %}
+        <div class="alert alert-warning" role="alert">
+          Payment gateway is not configured. Add Razorpay test keys to environment variables.
+        </div>
+        {% endif %}
+
+        <div class="mt-3">
+          <a href="{% url 'book_seats' theater.id %}" class="btn btn-outline-secondary">
+            Back to Seats
+          </a>
+        </div>
+        {% else %}
+        <div class="alert alert-warning" role="alert">
+          This reservation has expired. Please select seats again.
+        </div>
+        <a href="{% url 'book_seats' theater.id %}" class="btn btn-primary">
+          Select Seats Again
+        </a>
+        {% endif %}
       </div>
     </div>
   </div>
-</div>
+</section>
+
+{% if not expired %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var countdown = document.getElementById("reservation-countdown");
+    var expiresAt = new Date("{{ expires_at|date:'c' }}").getTime();
+    var payButton = document.getElementById("pay-button");
+
+    function updateCountdown() {
+      if (!countdown) {
+        return;
+      }
+      var remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+      var minutes = Math.floor(remaining / 60);
+      var seconds = remaining % 60;
+      countdown.textContent = minutes + ":" + String(seconds).padStart(2, "0");
+      if (remaining <= 0 && payButton) {
+        payButton.disabled = true;
+        payButton.textContent = "Reservation Expired";
+      }
+    }
+
+    updateCountdown();
+    window.setInterval(updateCountdown, 1000);
+  });
+</script>
+{% endif %}
 
 {% if payment_configured %}
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -84,7 +124,13 @@
     var verifyForm = document.getElementById("payment-verify-form");
     var message = document.getElementById("payment-message");
 
+    if (!payButton) {
+      return;
+    }
+
     payButton.addEventListener("click", function () {
+      payButton.disabled = true;
+      payButton.textContent = "Opening Payment...";
       var checkout = new Razorpay({
         key: "{{ razorpay_key_id }}",
         amount: "{{ amount }}",
@@ -93,6 +139,7 @@
         name: "BookMySeat",
         description: "{{ movie.name }} - {{ theater.name }}",
         handler: function (response) {
+          payButton.textContent = "Verifying Payment...";
           document.getElementById("razorpay_order_id").value = response.razorpay_order_id;
           document.getElementById("razorpay_payment_id").value = response.razorpay_payment_id;
           document.getElementById("razorpay_signature").value = response.razorpay_signature;
@@ -100,6 +147,8 @@
         },
         modal: {
           ondismiss: function () {
+            payButton.disabled = false;
+            payButton.textContent = "Pay Now";
             message.textContent = "Payment was cancelled. You can retry while the reservation is active.";
             fetch("{% url 'payment_cancelled' reservations.0.reservation_token %}", {
               method: "POST",

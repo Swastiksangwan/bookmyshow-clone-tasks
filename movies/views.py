@@ -156,10 +156,19 @@ def movie_detail(request,movie_id):
     trailer_embed_url = None
     if video_id:
         trailer_embed_url = f'https://www.youtube.com/embed/{video_id}'
+    trailer_fallback_message = 'Trailer not available.'
+    if not trailer_embed_url and movie.name.startswith('Evaluation:'):
+        trailer_fallback_message = (
+            'Trailer preview is not available for this evaluation title.'
+        )
     return render(
         request,
         'movies/movie_detail.html',
-        {'movie':movie,'trailer_embed_url':trailer_embed_url},
+        {
+            'movie':movie,
+            'trailer_embed_url':trailer_embed_url,
+            'trailer_fallback_message':trailer_fallback_message,
+        },
     )
 
 def theater_list(request,movie_id):

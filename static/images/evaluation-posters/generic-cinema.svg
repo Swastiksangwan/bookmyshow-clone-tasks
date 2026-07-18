@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Generic cinema poster placeholder</title>
+  <desc id="desc">Original generic poster placeholder for movies without uploaded poster art.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#343a40"/>
+      <stop offset="1" stop-color="#6b7280"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#bg)"/>
+  <rect x="95" y="160" width="410" height="250" rx="22" fill="#f8f9fa" opacity=".9"/>
+  <rect x="125" y="200" width="350" height="36" fill="#343a40" opacity=".25"/>
+  <rect x="125" y="270" width="350" height="36" fill="#343a40" opacity=".25"/>
+  <rect x="125" y="340" width="350" height="36" fill="#343a40" opacity=".25"/>
+  <circle cx="180" cy="555" r="70" fill="#f8f9fa" opacity=".9"/>
+  <circle cx="300" cy="555" r="70" fill="#f8f9fa" opacity=".9"/>
+  <circle cx="420" cy="555" r="70" fill="#f8f9fa" opacity=".9"/>
+  <text x="74" y="760" fill="#ffffff" font-family="Arial, sans-serif" font-size="62" font-weight="900">No Poster</text>
+  <text x="76" y="815" fill="#e5e7eb" font-family="Arial, sans-serif" font-size="30" font-weight="700">BookMySeat</text>
+</svg>

@@ -357,12 +357,23 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 
+# Source static assets committed with the project.
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
 # collectstatic writes production assets here.
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 
 # Django 4.2+ uses STORAGES.
 # Older supported project environments use STATICFILES_STORAGE.
+STATICFILES_STORAGE_BACKEND = (
+    "django.contrib.staticfiles.storage.StaticFilesStorage"
+    if DEBUG
+    else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+)
+
 if django.VERSION >= (4, 2):
     STORAGES = {
         "default": {
@@ -372,17 +383,15 @@ if django.VERSION >= (4, 2):
             ),
         },
         "staticfiles": {
-            "BACKEND": (
-                "whitenoise.storage."
-                "CompressedManifestStaticFilesStorage"
-            ),
+            "BACKEND": STATICFILES_STORAGE_BACKEND,
         },
     }
 else:
-    STATICFILES_STORAGE = (
-        "whitenoise.storage."
-        "CompressedManifestStaticFilesStorage"
-    )
+    STATICFILES_STORAGE = STATICFILES_STORAGE_BACKEND
+
+# Tests and local runs may reference new static assets before collectstatic
+# has generated a manifest. Deployment still runs collectstatic in build.sh.
+WHITENOISE_MANIFEST_STRICT = False
 
 
 # ---------------------------------------------------------------------

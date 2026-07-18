@@ -1,10 +1,13 @@
 {% extends "users/basic.html" %}
+{% load static %}
+
+{% block title %}Movies | BookMySeat{% endblock %}
 
 {% block content %}
-<div class="movie-catalog py-5">
+<div class="movie-catalog py-4">
   <div class="catalog-header d-flex justify-content-between align-items-start flex-wrap mb-4">
     <div class="mb-3 mb-md-0">
-      <h1 class="catalog-title mb-1">Movies</h1>
+      <h1 class="page-title mb-1">Movies</h1>
       <p class="text-muted mb-0">
         {{ result_count }} movie{% if result_count != 1 %}s{% endif %} found
       </p>
@@ -16,10 +19,10 @@
     {% endif %}
   </div>
 
-  <form method="GET" action="{% url 'movie_list' %}" class="movie-filter-form">
+  <form method="get" action="{% url 'movie_list' %}" class="movie-filter-form">
     <div class="row">
       <aside class="col-lg-3 mb-4">
-        <div class="filter-panel shadow-sm">
+        <div class="filter-panel">
           <div class="filter-section">
             <label for="movie-search" class="filter-heading">Search</label>
             <input
@@ -29,7 +32,6 @@
               placeholder="Search movies"
               type="text"
               value="{{ search_query }}"
-              aria-label="Search movies"
             />
           </div>
 
@@ -48,7 +50,7 @@
                 />
                 <label class="custom-control-label d-flex justify-content-between" for="genre-{{ genre.slug }}">
                   <span>{{ genre.name }}</span>
-                  <span class="filter-count">{{ genre.movie_count }}</span>
+                  <span class="filter-count">({{ genre.movie_count }})</span>
                 </label>
               </div>
               {% empty %}
@@ -72,7 +74,7 @@
                 />
                 <label class="custom-control-label d-flex justify-content-between" for="language-{{ language.code }}">
                   <span>{{ language.name }}</span>
-                  <span class="filter-count">{{ language.movie_count }}</span>
+                  <span class="filter-count">({{ language.movie_count }})</span>
                 </label>
               </div>
               {% empty %}
@@ -107,7 +109,7 @@
         {% if search_query or selected_genre_names or selected_language_names or selected_sort != "default" %}
         <div class="active-filter-panel mb-4">
           <div class="d-flex align-items-center flex-wrap">
-            <span class="active-filter-label mr-2">Active filters</span>
+            <span class="font-weight-bold mr-2">Active filters</span>
             {% if search_query %}
             <span class="filter-chip">Search: {{ search_query }}</span>
             {% endif %}
@@ -134,22 +136,21 @@
         <div class="row" id="movieList">
           {% for movie in movies %}
           <div class="col-md-6 col-xl-4 mb-4">
-            <article class="movie-card card h-100 shadow-sm">
+            <article class="movie-card card h-100">
               <div class="poster-frame">
                 {% if movie.image %}
                 <img
                   src="{{ movie.image.url }}"
                   class="movie-poster"
-                  alt="{{ movie.name }}"
-                  onerror="this.classList.add('d-none'); this.nextElementSibling.classList.remove('d-none');"
+                  alt="{{ movie.name }} poster"
+                  onerror="this.onerror=null; this.src='{% static movie.fallback_poster_static_path %}';"
                 />
-                <div class="poster-placeholder d-none">
-                  <span>No Poster</span>
-                </div>
                 {% else %}
-                <div class="poster-placeholder">
-                  <span>No Poster</span>
-                </div>
+                <img
+                  src="{% static movie.fallback_poster_static_path %}"
+                  class="movie-poster"
+                  alt="{{ movie.name }} poster placeholder"
+                />
                 {% endif %}
               </div>
 
@@ -158,7 +159,7 @@
 
                 <div class="movie-meta mb-2">
                   <span class="rating-pill">
-                    <i class="fas fa-star"></i> {{ movie.rating }}
+                    <i class="fas fa-star mr-1"></i> {{ movie.rating }}
                   </span>
                   {% if movie.language %}
                   <span class="language-pill">{{ movie.language.name }}</span>
@@ -175,7 +176,7 @@
 
                 {% if movie.cast %}
                 <p class="cast-text text-muted small mb-3">
-                  <i class="fas fa-users"></i> {{ movie.cast }}
+                  <i class="fas fa-users mr-1"></i> {{ movie.cast }}
                 </p>
                 {% endif %}
 
@@ -207,7 +208,7 @@
             <li class="page-item disabled"><span class="page-link">Previous</span></li>
             {% endif %}
 
-            <li class="page-item disabled page-status">
+            <li class="page-item disabled">
               <span class="page-link">
                 Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
               </span>
@@ -227,193 +228,4 @@
     </div>
   </form>
 </div>
-
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-
-<style>
-  .movie-catalog {
-    color: #242830;
-  }
-  .catalog-title {
-    font-weight: 700;
-    letter-spacing: 0;
-  }
-  .filter-panel {
-    border: 1px solid #e1e5eb;
-    border-radius: 8px;
-    padding: 18px;
-    background: #fff;
-    position: sticky;
-    top: 16px;
-  }
-  .filter-section {
-    padding-bottom: 18px;
-    margin-bottom: 18px;
-    border-bottom: 1px solid #edf0f4;
-  }
-  .filter-section:last-of-type {
-    border-bottom: 0;
-    margin-bottom: 8px;
-  }
-  .filter-heading {
-    display: block;
-    margin-bottom: 10px;
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: #343a40;
-    letter-spacing: 0;
-  }
-  .filter-list {
-    max-height: 220px;
-    overflow-y: auto;
-    padding-right: 4px;
-  }
-  .filter-option {
-    margin-bottom: 8px;
-    min-height: 24px;
-  }
-  .filter-option label {
-    width: 100%;
-    color: #3a3f46;
-  }
-  .filter-count {
-    margin-left: 10px;
-    color: #6c757d;
-    font-size: 0.85rem;
-  }
-  .filter-actions .btn-link {
-    color: #6c757d;
-    text-decoration: none;
-  }
-  .active-filter-panel {
-    border: 1px solid #d7e5ff;
-    background: #f5f9ff;
-    border-radius: 8px;
-    padding: 12px 14px;
-  }
-  .active-filter-label {
-    font-weight: 700;
-    color: #2f4054;
-  }
-  .filter-chip,
-  .genre-chip,
-  .language-pill,
-  .rating-pill {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    line-height: 1;
-    white-space: nowrap;
-  }
-  .filter-chip {
-    padding: 6px 9px;
-    margin: 4px 6px 4px 0;
-    background: #fff;
-    border: 1px solid #d9e4f5;
-    color: #36506c;
-    font-size: 0.85rem;
-  }
-  .movie-card {
-    border: 1px solid #e3e7ed;
-    border-radius: 8px;
-    overflow: hidden;
-    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-  }
-  .movie-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 22px rgba(31, 45, 61, 0.12) !important;
-  }
-  .poster-frame {
-    height: 300px;
-    background: #f1f3f6;
-    position: relative;
-    overflow: hidden;
-  }
-  .movie-poster {
-    width: 100%;
-    height: 100%;
-    display: block;
-    object-fit: cover;
-  }
-  .poster-placeholder {
-    width: 100%;
-    height: 100%;
-    min-height: 300px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background:
-      linear-gradient(135deg, #eef1f5 0%, #f8f9fb 100%);
-    color: #7a828d;
-    font-weight: 700;
-    border-bottom: 1px solid #e3e7ed;
-  }
-  .movie-title {
-    min-height: 48px;
-    font-weight: 700;
-    line-height: 1.25;
-  }
-  .movie-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .rating-pill {
-    padding: 6px 8px;
-    background: #fff6dd;
-    color: #7a5600;
-    font-size: 0.85rem;
-    font-weight: 700;
-  }
-  .rating-pill i {
-    color: #f4b400;
-    margin-right: 4px;
-  }
-  .language-pill {
-    padding: 6px 8px;
-    background: #eef7f0;
-    color: #27633a;
-    font-size: 0.85rem;
-    font-weight: 700;
-  }
-  .genre-row {
-    min-height: 28px;
-  }
-  .genre-chip {
-    padding: 5px 7px;
-    margin: 0 4px 5px 0;
-    background: #f1f4f8;
-    color: #53606f;
-    font-size: 0.78rem;
-  }
-  .cast-text {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .empty-state {
-    border: 1px dashed #cfd6df;
-    border-radius: 8px;
-    background: #fbfcfd;
-  }
-  .catalog-pagination .page-link {
-    border-radius: 6px;
-    margin: 3px;
-  }
-  .catalog-pagination .page-status .page-link {
-    color: #495057;
-    background: #f8f9fa;
-  }
-  @media (max-width: 991.98px) {
-    .filter-panel {
-      position: static;
-    }
-    .poster-frame,
-    .poster-placeholder {
-      min-height: 260px;
-      height: 260px;
-    }
-  }
-</style>
 {% endblock %}

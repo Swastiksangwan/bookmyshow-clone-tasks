@@ -8,6 +8,15 @@ from django.utils import timezone
 from .validators import validate_youtube_url
 
 
+EVALUATION_POSTER_PATHS = {
+    "Evaluation: Big Buck Bunny": "images/evaluation-posters/big-buck-bunny.svg",
+    "Evaluation: Interstellar Dreams": "images/evaluation-posters/interstellar-dreams.svg",
+    "Evaluation: Mumbai Nights": "images/evaluation-posters/mumbai-nights.svg",
+    "Evaluation: Comedy Junction": "images/evaluation-posters/comedy-junction.svg",
+    "Evaluation: Southern Quest": "images/evaluation-posters/southern-quest.svg",
+}
+
+
 class Genre(models.Model):
     name = models.CharField(max_length=100, unique=True)
     slug = models.SlugField(max_length=120, unique=True)
@@ -61,6 +70,13 @@ class Movie(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def fallback_poster_static_path(self):
+        return EVALUATION_POSTER_PATHS.get(
+            self.name,
+            "images/evaluation-posters/generic-cinema.svg",
+        )
 
 class Theater(models.Model):
     name = models.CharField(max_length=255)

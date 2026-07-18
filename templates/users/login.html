@@ -1,91 +1,65 @@
 {% extends "users/basic.html" %}
 
+{% block title %}Login | BookMySeat{% endblock %}
+
 {% block content %}
-<div class="container py-5">
-    <div class="row justify-content-center">
-        <div class="col-md-6">
-            <div class="card shadow">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="modal-title mb-0" id="loginModalLabel">
-                        <i class="fas fa-sign-in-alt me-2"></i> Log In
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <form method="POST" action="{% url 'login' %}">
-                        {% csrf_token %}
-                        <!-- Username Input -->
-                        <div class="mb-3">
-                            <label for="{{ form.username.id_for_label }}" class="form-label">Username</label>
-                            <div class="input-group">
-                                <span class="input-group-text">
-                                    <i class="fas fa-user"></i>
-                                </span>
-                                {{ form.username }}
-                            </div>
-                        </div>
+<section class="auth-page py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-7 col-lg-5">
+      <div class="app-card detail-panel">
+        <h1 class="h3 mb-2">Log In</h1>
+        <p class="text-muted mb-4">Access your bookings and continue reserved seats.</p>
 
-                        <!-- Password Input -->
-                        <div class="mb-3">
-                            <label for="{{ form.password.id_for_label }}" class="form-label">Password</label>
-                            <div class="input-group">
-                                <span class="input-group-text">
-                                    <i class="fas fa-lock"></i>
-                                </span>
-                                {{ form.password }}
-                                <button class="btn btn-outline-secondary" type="button" id="togglePassword">
-                                    <i class="fas fa-eye" id="toggleIcon"></i>
-                                </button>
-                            </div>
-                        </div>
+        <form method="POST" action="{% url 'login' %}">
+          {% csrf_token %}
+          <div class="form-group">
+            <label for="{{ form.username.id_for_label }}">Username</label>
+            {{ form.username }}
+          </div>
 
-                        <!-- Submit Button -->
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-sign-in-alt me-2"></i> Login
-                            </button>
-                        </div>
-                    </form>
-                </div>
-                <div class="card-footer text-center">
-                    <a href="{% url 'password_reset' %}" class="text-decoration-none">Forgot Password?</a>
-                    <hr>
-                    <p class="mb-0">Don't have an account? <a href="{% url 'register' %}" class="text-decoration-none">Sign Up</a></p>
-                </div>
+          <div class="form-group">
+            <label for="{{ form.password.id_for_label }}">Password</label>
+            <div class="input-group">
+              {{ form.password }}
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button" id="togglePassword" aria-label="Show or hide password">
+                  <i class="fas fa-eye" id="toggleIcon"></i>
+                </button>
+              </div>
             </div>
-        </div>
-    </div>
-</div>
+          </div>
 
-<style>
-    .card {
-        border-radius: 1rem;
-    }
-    .card-header {
-        border-top-left-radius: 1rem;
-        border-top-right-radius: 1rem;
-    }
-    .input-group-text {
-        background-color: #f8f9fa;
-    }
-    .form-control:focus {
-        box-shadow: none;
-        border-color: #80bdff;
-    }
-</style>
+          <button type="submit" class="btn btn-primary btn-block">
+            Login
+          </button>
+        </form>
+
+        <div class="auth-footer mt-4 pt-3">
+          <a href="{% url 'password_reset' %}">Forgot Password?</a>
+          <span class="mx-2 text-muted">|</span>
+          <a href="{% url 'register' %}">Create an account</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const togglePassword = document.getElementById('togglePassword');
-        const passwordField = document.getElementById('{{ form.password.id_for_label }}');
-        const toggleIcon = document.getElementById('toggleIcon');
+  document.addEventListener("DOMContentLoaded", function() {
+    var togglePassword = document.getElementById("togglePassword");
+    var passwordField = document.getElementById("{{ form.password.id_for_label }}");
+    var toggleIcon = document.getElementById("toggleIcon");
 
-        togglePassword.addEventListener('click', function() {
-            const type = passwordField.getAttribute('type') === 'password' ? 'text' : 'password';
-            passwordField.setAttribute('type', type);
-            toggleIcon.classList.toggle('fa-eye');
-            toggleIcon.classList.toggle('fa-eye-slash');
-        });
+    if (!togglePassword || !passwordField) {
+      return;
+    }
+
+    togglePassword.addEventListener("click", function() {
+      var type = passwordField.getAttribute("type") === "password" ? "text" : "password";
+      passwordField.setAttribute("type", type);
+      toggleIcon.classList.toggle("fa-eye");
+      toggleIcon.classList.toggle("fa-eye-slash");
     });
+  });
 </script>
-
 {% endblock %}

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Evaluation poster for Interstellar Dreams</title>
+  <desc id="desc">Original space-themed poster placeholder for a fictional evaluation movie.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="1" stop-color="#284b8f"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#bg)"/>
+  <circle cx="442" cy="180" r="74" fill="#f2d38a"/>
+  <circle cx="442" cy="180" r="112" fill="none" stroke="#f2d38a" stroke-width="3" opacity=".35"/>
+  <path d="M68 530 C170 450 320 450 526 530" fill="none" stroke="#9fd5ff" stroke-width="8" opacity=".75"/>
+  <path d="M118 590 C230 520 350 520 486 590" fill="none" stroke="#ffffff" stroke-width="3" opacity=".5"/>
+  <polygon points="300,320 332,440 300,410 268,440" fill="#ffffff"/>
+  <polygon points="300,320 314,430 300,410" fill="#cde7ff"/>
+  <circle cx="105" cy="135" r="4" fill="#fff"/>
+  <circle cx="165" cy="245" r="3" fill="#fff"/>
+  <circle cx="515" cy="315" r="5" fill="#fff"/>
+  <circle cx="410" cy="440" r="3" fill="#fff"/>
+  <text x="52" y="695" fill="#9fd5ff" font-family="Arial, sans-serif" font-size="32" font-weight="700">SCI-FI DRAMA</text>
+  <text x="52" y="778" fill="#ffffff" font-family="Arial, sans-serif" font-size="57" font-weight="900">Interstellar</text>
+  <text x="52" y="838" fill="#ffffff" font-family="Arial, sans-serif" font-size="57" font-weight="900">Dreams</text>
+</svg>
