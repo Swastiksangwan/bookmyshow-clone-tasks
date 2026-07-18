@@ -8,3 +8,5 @@ __pycache__/
 
 # Local database can contain user accounts and password hashes.
 db.sqlite3
+
+staticfiles/

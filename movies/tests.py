@@ -26,6 +26,7 @@ from .email_notifications import (
     render_booking_confirmation_email,
     send_booking_confirmation_email,
 )
+from movies.management.commands.seed_evaluation_data import SEED_MOVIES
 from .models import (
     Booking,
     BookingEmailNotification,
@@ -1409,3 +1410,65 @@ class MovieFilteringTests(TestCase):
         self.assertGreaterEqual(Language.objects.count(), 8)
         self.assertGreater(Movie.genres.through.objects.count(), 25)
         self.assertIn('Movies created: 25', output.getvalue())
+
+
+class SeedEvaluationDataCommandTests(TestCase):
+    def seed_movie_names(self):
+        return [movie_data['name'] for movie_data in SEED_MOVIES]
+
+    def test_seed_evaluation_data_creates_bookable_data(self):
+        output = StringIO()
+
+        call_command('seed_evaluation_data', stdout=output)
+
+        movies = Movie.objects.filter(name__in=self.seed_movie_names()).order_by('name')
+        self.assertEqual(movies.count(), 4)
+        self.assertGreaterEqual(Genre.objects.count(), 7)
+        self.assertGreaterEqual(Language.objects.count(), 4)
+        self.assertTrue(movies.filter(trailer_url__isnull=False).exclude(trailer_url='').exists())
+        self.assertEqual(Booking.objects.count(), 0)
+        self.assertEqual(PaymentTransaction.objects.count(), 0)
+
+        for movie_data in SEED_MOVIES:
+            movie = Movie.objects.get(name=movie_data['name'])
+            self.assertIsNotNone(movie.language)
+            self.assertGreaterEqual(movie.genres.count(), 1)
+            self.assertTrue(movie.cast)
+            self.assertTrue(movie.description)
+            self.assertGreater(movie.rating, 0)
+
+            theater = Theater.objects.get(movie=movie, name=movie_data['theater_name'])
+            seats = Seat.objects.filter(theater=theater)
+            self.assertEqual(seats.count(), 10)
+            self.assertFalse(seats.filter(is_booked=True).exists())
+
+        self.assertIn('Evaluation data seed complete.', output.getvalue())
+        self.assertIn('No completed bookings or payments were created.', output.getvalue())
+
+    def test_seed_evaluation_data_is_idempotent_for_movies_theaters_and_seats(self):
+        first_output = StringIO()
+        second_output = StringIO()
+
+        call_command('seed_evaluation_data', stdout=first_output)
+        movie_names = self.seed_movie_names()
+        first_movie_count = Movie.objects.filter(name__in=movie_names).count()
+        first_theater_count = Theater.objects.filter(movie__name__in=movie_names).count()
+        first_seat_count = Seat.objects.filter(theater__movie__name__in=movie_names).count()
+
+        call_command('seed_evaluation_data', stdout=second_output)
+
+        self.assertEqual(Movie.objects.filter(name__in=movie_names).count(), first_movie_count)
+        self.assertEqual(
+            Theater.objects.filter(movie__name__in=movie_names).count(),
+            first_theater_count,
+        )
+        self.assertEqual(
+            Seat.objects.filter(theater__movie__name__in=movie_names).count(),
+            first_seat_count,
+        )
+        self.assertEqual(first_movie_count, 4)
+        self.assertEqual(first_theater_count, 4)
+        self.assertEqual(first_seat_count, 40)
+        self.assertIn('Movies: 0 created, 4 reused.', second_output.getvalue())
+        self.assertIn('Theaters: 0 created, 4 reused.', second_output.getvalue())
+        self.assertIn('Seats: 0 created, 40 reused.', second_output.getvalue())
