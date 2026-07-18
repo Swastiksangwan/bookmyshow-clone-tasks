@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Evaluation poster for Mumbai Nights</title>
+  <desc id="desc">Original city thriller poster placeholder for a fictional evaluation movie.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#241332"/>
+      <stop offset="1" stop-color="#0f6f7e"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#bg)"/>
+  <circle cx="460" cy="150" r="62" fill="#ffd166" opacity=".9"/>
+  <rect x="58" y="390" width="70" height="315" fill="#151a27"/>
+  <rect x="150" y="300" width="84" height="405" fill="#111827"/>
+  <rect x="260" y="355" width="70" height="350" fill="#151a27"/>
+  <rect x="360" y="260" width="96" height="445" fill="#111827"/>
+  <rect x="478" y="420" width="64" height="285" fill="#151a27"/>
+  <g fill="#ffd166" opacity=".75">
+    <rect x="78" y="430" width="16" height="16"/>
+    <rect x="174" y="345" width="16" height="16"/>
+    <rect x="206" y="455" width="16" height="16"/>
+    <rect x="386" y="315" width="16" height="16"/>
+    <rect x="424" y="505" width="16" height="16"/>
+    <rect x="496" y="460" width="16" height="16"/>
+  </g>
+  <path d="M0 705 L600 640 L600 900 L0 900 Z" fill="#10151f" opacity=".88"/>
+  <text x="52" y="705" fill="#65d6d2" font-family="Arial, sans-serif" font-size="32" font-weight="700">CITY THRILLER</text>
+  <text x="52" y="790" fill="#ffffff" font-family="Arial, sans-serif" font-size="64" font-weight="900">Mumbai</text>
+  <text x="52" y="850" fill="#ffffff" font-family="Arial, sans-serif" font-size="64" font-weight="900">Nights</text>
+</svg>

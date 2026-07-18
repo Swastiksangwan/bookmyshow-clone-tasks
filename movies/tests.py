@@ -1422,7 +1422,7 @@ class SeedEvaluationDataCommandTests(TestCase):
         call_command('seed_evaluation_data', stdout=output)
 
         movies = Movie.objects.filter(name__in=self.seed_movie_names()).order_by('name')
-        self.assertEqual(movies.count(), 4)
+        self.assertEqual(movies.count(), len(SEED_MOVIES))
         self.assertGreaterEqual(Genre.objects.count(), 7)
         self.assertGreaterEqual(Language.objects.count(), 4)
         self.assertTrue(movies.filter(trailer_url__isnull=False).exclude(trailer_url='').exists())
@@ -1436,6 +1436,8 @@ class SeedEvaluationDataCommandTests(TestCase):
             self.assertTrue(movie.cast)
             self.assertTrue(movie.description)
             self.assertGreater(movie.rating, 0)
+            if movie.name == 'Evaluation: Interstellar Dreams':
+                self.assertFalse(movie.trailer_url)
 
             theater = Theater.objects.get(movie=movie, name=movie_data['theater_name'])
             seats = Seat.objects.filter(theater=theater)
@@ -1466,9 +1468,140 @@ class SeedEvaluationDataCommandTests(TestCase):
             Seat.objects.filter(theater__movie__name__in=movie_names).count(),
             first_seat_count,
         )
-        self.assertEqual(first_movie_count, 4)
-        self.assertEqual(first_theater_count, 4)
-        self.assertEqual(first_seat_count, 40)
-        self.assertIn('Movies: 0 created, 4 reused.', second_output.getvalue())
-        self.assertIn('Theaters: 0 created, 4 reused.', second_output.getvalue())
-        self.assertIn('Seats: 0 created, 40 reused.', second_output.getvalue())
+        self.assertEqual(first_movie_count, len(SEED_MOVIES))
+        self.assertEqual(first_theater_count, len(SEED_MOVIES))
+        self.assertEqual(first_seat_count, len(SEED_MOVIES) * 10)
+        self.assertIn(
+            f'Movies: 0 created, {len(SEED_MOVIES)} reused.',
+            second_output.getvalue(),
+        )
+        self.assertIn(
+            f'Theaters: 0 created, {len(SEED_MOVIES)} reused.',
+            second_output.getvalue(),
+        )
+        self.assertIn(
+            f'Seats: 0 created, {len(SEED_MOVIES) * 10} reused.',
+            second_output.getvalue(),
+        )
+
+
+class EvaluatorAdminCommandTests(TestCase):
+    def setUp(self):
+        self.output = StringIO()
+        call_command(
+            'create_evaluator_admin',
+            username='evaluator_admin_test',
+            email='evaluator@example.com',
+            password='BookMySeatEval@2026',
+            stdout=self.output,
+        )
+        self.evaluator = User.objects.get(username='evaluator_admin_test')
+        self.client.login(
+            username='evaluator_admin_test',
+            password='BookMySeatEval@2026',
+        )
+
+    def create_admin_fixture(self):
+        movie = Movie.objects.create(
+            name='Admin View Movie',
+            image='',
+            rating='8.1',
+            cast='Admin Cast',
+            description='Admin fixture movie.',
+        )
+        theater = Theater.objects.create(
+            name='Admin Theater',
+            movie=movie,
+            time=timezone.now() + timedelta(days=1),
+        )
+        seat = Seat.objects.create(theater=theater, seat_number='A1')
+        booking_user = User.objects.create_user(
+            username='booking_user',
+            password='password123',
+            email='booking@example.com',
+        )
+        booking = Booking.objects.create(
+            user=booking_user,
+            seat=seat,
+            movie=movie,
+            theater=theater,
+        )
+        transaction_obj = PaymentTransaction.objects.create(
+            user=booking_user,
+            reservation_token='00000000-0000-0000-0000-000000000099',
+            razorpay_order_id='order_admin_view',
+            razorpay_payment_id='pay_admin_view',
+            amount=20000,
+            currency='INR',
+            status=PaymentTransaction.STATUS_CAPTURED,
+            idempotency_key='admin-view-payment',
+            verified_at=timezone.now(),
+        )
+        return movie, theater, seat, booking, transaction_obj
+
+    def test_evaluator_password_is_hashed_and_account_is_restricted(self):
+        self.assertTrue(self.evaluator.check_password('BookMySeatEval@2026'))
+        self.assertNotEqual(self.evaluator.password, 'BookMySeatEval@2026')
+        self.assertTrue(self.evaluator.is_active)
+        self.assertTrue(self.evaluator.is_staff)
+        self.assertFalse(self.evaluator.is_superuser)
+        self.assertTrue(self.evaluator.groups.filter(name='analytics_admin').exists())
+        self.assertFalse(self.evaluator.has_perm('auth.add_user'))
+        self.assertFalse(self.evaluator.has_perm('auth.change_user'))
+        self.assertFalse(self.evaluator.has_perm('auth.delete_group'))
+        self.assertNotIn('BookMySeatEval@2026', self.output.getvalue())
+
+    def test_evaluator_can_access_analytics_dashboard(self):
+        response = self.client.get(reverse('admin_dashboard'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Admin Analytics Dashboard')
+
+    def test_evaluator_can_view_permitted_admin_records(self):
+        self.create_admin_fixture()
+
+        movie_response = self.client.get(reverse('admin:movies_movie_changelist'))
+        payment_response = self.client.get(
+            reverse('admin:movies_paymenttransaction_changelist')
+        )
+        email_response = self.client.get(
+            reverse('admin:movies_bookingemailnotification_changelist')
+        )
+
+        self.assertEqual(movie_response.status_code, 200)
+        self.assertEqual(payment_response.status_code, 200)
+        self.assertEqual(email_response.status_code, 200)
+
+    def test_evaluator_cannot_manage_users_or_groups(self):
+        user_response = self.client.get(reverse('admin:auth_user_changelist'))
+        group_response = self.client.get(reverse('admin:auth_group_changelist'))
+
+        self.assertEqual(user_response.status_code, 403)
+        self.assertEqual(group_response.status_code, 403)
+
+    def test_evaluator_cannot_change_or_delete_protected_records(self):
+        movie, theater, seat, booking, transaction_obj = self.create_admin_fixture()
+        change_response = self.client.post(
+            reverse('admin:movies_paymenttransaction_change', args=[transaction_obj.id]),
+            {
+                'user': transaction_obj.user_id,
+                'reservation_token': transaction_obj.reservation_token,
+                'razorpay_order_id': transaction_obj.razorpay_order_id,
+                'razorpay_payment_id': transaction_obj.razorpay_payment_id,
+                'amount': transaction_obj.amount,
+                'currency': transaction_obj.currency,
+                'status': PaymentTransaction.STATUS_FAILED,
+                'idempotency_key': transaction_obj.idempotency_key,
+                '_save': 'Save',
+            },
+        )
+        delete_response = self.client.post(
+            reverse('admin:movies_booking_delete', args=[booking.id]),
+            {'post': 'yes'},
+        )
+
+        self.assertEqual(change_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+        transaction_obj.refresh_from_db()
+        self.assertEqual(transaction_obj.status, PaymentTransaction.STATUS_CAPTURED)
+        self.assertTrue(Booking.objects.filter(pk=booking.pk).exists())

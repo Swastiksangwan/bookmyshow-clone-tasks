@@ -27,6 +27,19 @@ SEED_LANGUAGES = [
 
 SEED_MOVIES = [
     {
+        "name": "Evaluation: Big Buck Bunny",
+        "language": "english",
+        "genres": ["Comedy", "Adventure"],
+        "rating": "8.0",
+        "cast": "Blender Foundation Open Movie Team",
+        "description": (
+            "A clearly labelled evaluation title using the open Big Buck Bunny "
+            "short film trailer so trailer embedding can be tested with a related source."
+        ),
+        "trailer_url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+        "theater_name": "Evaluation Screen 0",
+    },
+    {
         "name": "Evaluation: Interstellar Dreams",
         "language": "english",
         "genres": ["Sci-Fi", "Drama", "Adventure"],
@@ -36,7 +49,7 @@ SEED_MOVIES = [
             "A hopeful space adventure about a young engineer racing to save a "
             "colony ship before its final launch window closes."
         ),
-        "trailer_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "trailer_url": "",
         "theater_name": "Evaluation Screen 1",
     },
     {
@@ -125,7 +138,7 @@ class Command(BaseCommand):
                 movie, created = Movie.objects.update_or_create(
                     name=movie_data["name"],
                     defaults={
-                        "image": "movies/test.jpg",
+                        "image": "",
                         "rating": movie_data["rating"],
                         "cast": movie_data["cast"],
                         "description": movie_data["description"],

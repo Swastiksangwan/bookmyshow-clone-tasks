@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Evaluation poster for Big Buck Bunny</title>
+  <desc id="desc">Original geometric poster placeholder for the evaluation movie Big Buck Bunny.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f7d774"/>
+      <stop offset="1" stop-color="#57b37a"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#bg)"/>
+  <circle cx="450" cy="160" r="86" fill="#fff3c4" opacity=".9"/>
+  <circle cx="305" cy="375" r="142" fill="#ffffff" opacity=".88"/>
+  <ellipse cx="250" cy="275" rx="46" ry="125" fill="#ffffff" transform="rotate(-18 250 275)"/>
+  <ellipse cx="360" cy="275" rx="46" ry="125" fill="#ffffff" transform="rotate(18 360 275)"/>
+  <circle cx="260" cy="365" r="14" fill="#2d3b2f"/>
+  <circle cx="350" cy="365" r="14" fill="#2d3b2f"/>
+  <path d="M270 432 Q305 462 340 432" fill="none" stroke="#2d3b2f" stroke-width="10" stroke-linecap="round"/>
+  <path d="M0 735 C150 690 250 760 600 700 L600 900 L0 900 Z" fill="#223b32" opacity=".9"/>
+  <text x="50" y="700" fill="#ffffff" font-family="Arial, sans-serif" font-size="35" font-weight="700">OPEN MOVIE DEMO</text>
+  <text x="50" y="782" fill="#ffffff" font-family="Arial, sans-serif" font-size="58" font-weight="900">Big Buck</text>
+  <text x="50" y="842" fill="#ffffff" font-family="Arial, sans-serif" font-size="58" font-weight="900">Bunny</text>
+</svg>

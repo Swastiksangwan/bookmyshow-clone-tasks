@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Evaluation poster for Southern Quest</title>
+  <desc id="desc">Original action adventure poster placeholder for a fictional evaluation movie.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#133b2a"/>
+      <stop offset="1" stop-color="#e07a2f"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#bg)"/>
+  <path d="M0 575 L150 310 L255 505 L355 245 L600 610 L600 900 L0 900 Z" fill="#f4d089" opacity=".9"/>
+  <path d="M0 630 L180 420 L300 655 L410 395 L600 675 L600 900 L0 900 Z" fill="#194734" opacity=".9"/>
+  <circle cx="455" cy="160" r="76" fill="#ffcf73"/>
+  <path d="M165 575 L305 470 L445 575 L305 542 Z" fill="#ffffff" opacity=".85"/>
+  <path d="M305 470 L335 550 L305 542" fill="#c9d7dd"/>
+  <text x="52" y="700" fill="#ffcf73" font-family="Arial, sans-serif" font-size="32" font-weight="700">ACTION ADVENTURE</text>
+  <text x="52" y="787" fill="#ffffff" font-family="Arial, sans-serif" font-size="61" font-weight="900">Southern</text>
+  <text x="52" y="848" fill="#ffffff" font-family="Arial, sans-serif" font-size="61" font-weight="900">Quest</text>
+</svg>

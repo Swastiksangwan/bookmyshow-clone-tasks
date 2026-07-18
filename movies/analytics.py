@@ -28,6 +28,22 @@ def paise_to_rupees(amount_paise):
     return round((amount_paise or 0) / 100, 2)
 
 
+def format_indian_rupees(amount_paise):
+    amount = paise_to_rupees(amount_paise)
+    whole, decimal = f"{amount:.2f}".split(".")
+    if len(whole) > 3:
+        last_three = whole[-3:]
+        leading = whole[:-3]
+        groups = []
+        while len(leading) > 2:
+            groups.insert(0, leading[-2:])
+            leading = leading[:-2]
+        if leading:
+            groups.insert(0, leading)
+        whole = ",".join(groups + [last_three])
+    return f"INR {whole}.{decimal}"
+
+
 def _sum_captured_revenue(start_time, now):
     total = PaymentTransaction.objects.filter(
         status=PaymentTransaction.STATUS_CAPTURED,
@@ -135,6 +151,9 @@ def get_admin_analytics():
             "today_rupees": paise_to_rupees(today_paise),
             "last_7_days_rupees": paise_to_rupees(last_7_days_paise),
             "current_month_rupees": paise_to_rupees(current_month_paise),
+            "today_display": format_indian_rupees(today_paise),
+            "last_7_days_display": format_indian_rupees(last_7_days_paise),
+            "current_month_display": format_indian_rupees(current_month_paise),
         },
         "popular_movies": popular_movies,
         "busiest_theaters": busiest_theaters,
@@ -145,6 +164,7 @@ def get_admin_analytics():
             "cancellation_rate": cancellation_rate,
         },
         "generated_at": local_now.isoformat(),
+        "generated_at_display": local_now.strftime("%d %b %Y, %I:%M %p"),
         "cache_ttl_seconds": ANALYTICS_CACHE_TTL_SECONDS,
     }
 
